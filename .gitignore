@@ -1,0 +1,10 @@
+node_modules/
+build/
+dist/
+coverage/
+.env
+.env.*
+*.log
+
+# Owner's private notes (Spanish), not part of the published app
+docs/PASOS.md

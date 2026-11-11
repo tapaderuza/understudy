@@ -1,0 +1,251 @@
+modules:
+  jira:globalPage:
+    - key: understudy-page
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: Understudy
+
+  jira:issuePanel:
+    - key: understudy-issue-panel
+      resource: panel
+      resolver:
+        function: resolver
+      render: native
+      title: Understudy
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+
+  rovo:agent:
+    - key: understudy-agent
+      name: Understudy
+      description: Hands over work before someone goes away and catches them up when
+        they are back. Finds what must be covered, who already has the context,
+        and briefs them.
+      prompt: resource:agent-prompt;prompt.txt
+      conversationStarters:
+        - Prepare my handover for next week
+        - Who should cover the work item I am looking at?
+        - What do only I know about before I go on leave?
+        - I'm back. What changed and what needs me first?
+      actions:
+        - get-handover-brief
+        - suggest-stand-ins
+        - publish-handover-page
+        - brief-stand-in
+        - get-welcome-back-brief
+      skills:
+        - handover-planner
+        - welcome-back
+
+  rovo:skill:
+    - key: handover-planner
+      source:
+        dir: skills/handover-planner
+      dependencies:
+        tools:
+          - get-handover-brief
+          - suggest-stand-ins
+          - publish-handover-page
+          - brief-stand-in
+    - key: welcome-back
+      source:
+        dir: skills/welcome-back
+      dependencies:
+        tools:
+          - get-welcome-back-brief
+
+  rovo:mcp:
+    - key: understudy-mcp
+      name: Understudy handovers
+      tools:
+        - get-handover-brief
+        - suggest-stand-ins
+        - publish-handover-page
+        - brief-stand-in
+        - get-welcome-back-brief
+
+  action:
+    - key: get-welcome-back-brief
+      name: Get welcome-back brief
+      function: welcome-fn
+      actionVerb: GET
+      description: >-
+        For someone back from time away: work they own, reported or watch that
+        others changed since they left, with mentions, reassignments and replies
+        waiting listed first.
+      inputs:
+        person:
+          title: Person
+          type: string
+          required: false
+          description: "Display name or account ID of the person who is back. Empty or
+            'me' means the current user."
+        since:
+          title: First day away
+          type: string
+          required: false
+          description: "First day of the absence as YYYY-MM-DD. Defaults to 14 days ago."
+
+    - key: get-handover-brief
+      name: Get handover brief
+      function: brief-fn
+      actionVerb: GET
+      description: >-
+        Builds a handover brief for someone going away: open Jira work ranked by
+        what must be covered, a suggested stand-in per item with evidence, work
+        only they know, open pull requests, goals and pages.
+      inputs:
+        person:
+          title: Person
+          type: string
+          required: false
+          description: "Display name or Atlassian account ID of the person going away.
+            Leave empty, or use 'me', for the current user."
+        startDate:
+          title: First day away
+          type: string
+          required: false
+          description: "First day of the absence as YYYY-MM-DD. Defaults to today."
+        endDate:
+          title: Last day away
+          type: string
+          required: false
+          description: "Last day of the absence, inclusive, as YYYY-MM-DD. Defaults to six
+            days after the first day."
+
+    - key: suggest-stand-ins
+      name: Suggest stand-ins for a work item
+      function: standins-fn
+      actionVerb: GET
+      description: >-
+        Ranks who could cover one Jira work item while its assignee is away,
+        with reasons: comments on it, work in the same epic or components, team,
+        and how much they already carry.
+      inputs:
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: "Jira work item key such as PAY-101. If empty, the work item the
+            user is viewing is used."
+
+    - key: publish-handover-page
+      name: Publish handover page
+      function: publish-fn
+      actionVerb: CREATE
+      description: >-
+        Publishes the handover brief as a Confluence page in the given space and
+        returns its link. Call only after the user confirms the space and the
+        dates.
+      inputs:
+        spaceKey:
+          title: Confluence space key
+          type: string
+          required: true
+          description: "Key of the Confluence space where the page is created, for example
+            TEAM."
+        person:
+          title: Person
+          type: string
+          required: false
+          description: "Display name or account ID of the person going away. Empty or 'me'
+            means the current user."
+        startDate:
+          title: First day away
+          type: string
+          required: false
+          description: "First day of the absence as YYYY-MM-DD."
+        endDate:
+          title: Last day away
+          type: string
+          required: false
+          description: "Last day of the absence, inclusive, as YYYY-MM-DD."
+
+    - key: brief-stand-in
+      name: Brief a stand-in
+      function: notify-fn
+      actionVerb: CREATE
+      description: >-
+        Comments on a Jira work item to @-mention the stand-in with what they
+        cover, why it matters and why they were picked, and adds them as a
+        watcher. Call only after the user confirms both.
+      inputs:
+        standIn:
+          title: Stand-in
+          type: string
+          required: true
+          description: "Display name or account ID of the person who will cover the work
+            item."
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: "Jira work item key such as PAY-101. If empty, the work item the
+            user is viewing is used."
+        note:
+          title: Note
+          type: string
+          required: false
+          description: "Optional context from the person going away, such as where the
+            runbook is."
+        startDate:
+          title: First day away
+          type: string
+          required: false
+          description: "First day of the absence as YYYY-MM-DD."
+        endDate:
+          title: Last day away
+          type: string
+          required: false
+          description: "Last day of the absence, inclusive, as YYYY-MM-DD."
+
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: brief-fn
+      handler: index.getHandoverBrief
+    - key: standins-fn
+      handler: index.suggestStandIns
+    - key: publish-fn
+      handler: index.publishHandoverPage
+    - key: notify-fn
+      handler: index.briefStandIn
+    - key: welcome-fn
+      handler: index.getWelcomeBackBrief
+
+resources:
+  - key: main
+    path: src/frontend/index.tsx
+  - key: panel
+    path: src/frontend/panel.tsx
+  - key: agent-prompt
+    path: resource/agent
+
+permissions:
+  scopes:
+    # Jira: read work and people, write comments and watchers
+    - read:jira-work
+    - read:jira-user
+    - write:jira-work
+    # Confluence: find recent pages, list spaces, publish the handover page
+    - search:confluence
+    - read:space:confluence
+    - write:page:confluence
+    # Teamwork Graph (read-only): teams, goals, projects, work items, pull requests
+    - read:graph:user:atlassian
+    - read:graph:team:atlassian
+    - read:graph:goal:atlassian
+    - read:graph:project:atlassian
+    - read:graph:issue:jira
+    - read:graph:pull-request:external
+
+app:
+  runtime:
+    name: nodejs24.x
+  id: ari:cloud:ecosystem::app/f822ce82-2fbb-4e00-878f-0798dda01b8c
+  compatibility:
+    jira:
+      required: true
+    confluence:
+      required: false
