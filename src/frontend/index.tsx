@@ -253,7 +253,7 @@ const Handover = () => {
           key: 'because',
           content: (
             <Stack space="space.025">
-              {reasons.slice(0, 4).map((r) => (
+              {reasons.map((r) => (
                 <Text key={r.text} size="small" color={r.points < 0 ? 'color.text.warning' : 'color.text'}>
                   {r.points > 0 ? `+${r.points}` : String(r.points)} {r.text}
                 </Text>

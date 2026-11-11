@@ -84,7 +84,7 @@ const Panel = () => {
               <User accountId={c.accountId} />
               {i === 0 ? <Lozenge appearance="success">Best fit</Lozenge> : <Text size="small">{`Score ${c.score}`}</Text>}
             </Inline>
-            {c.reasons.slice(0, 4).map((r) => (
+            {c.reasons.map((r) => (
               <Text key={r.text} size="small" color={r.points < 0 ? 'color.text.warning' : 'color.text.subtle'}>
                 {r.points > 0 ? `+${r.points}` : String(r.points)} {r.text}
               </Text>
