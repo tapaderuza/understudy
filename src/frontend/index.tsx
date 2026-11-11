@@ -625,7 +625,8 @@ const Handover = () => {
               {active.length > 0 && (
                 <Stack space="space.075">
                   <Text size="small">
-                    <Strong>{`${coveredCount} of ${active.length}`}</Strong> items to cover have a stand-in with context
+                    <Strong>{`${coveredCount} of ${active.length}`}</Strong>
+                    {` items to cover (${brief.stats.must} must, ${brief.stats.should} should) have a stand-in with context`}
                   </Text>
                   <ProgressBar
                     value={coveredCount / active.length}
