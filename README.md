@@ -13,6 +13,12 @@ It works in four places: a Jira page, a panel on every work item, a Rovo agent w
 
 ---
 
+## Demo video
+
+[![Understudy demo video, 2 minutes 37 seconds](docs/gallery/09-demo-video-thumbnail.png)](https://youtu.be/pooYSBFNaFw)
+
+The live app on a real Atlassian site: build a handover, the evidence behind each stand-in, the warning for what only the person knows, briefing and publishing, the work item panel, the Rovo agent, MCP and Welcome back (2:37).
+
 ## What it does
 
 | Where | What you get |

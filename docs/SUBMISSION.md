@@ -35,7 +35,7 @@ Distribution is set to "Sharing with anyone" (production environment, Jira, with
 
 ## Demo video (YouTube, public, under 5 minutes)
 
-[Paste the YouTube URL]
+https://youtu.be/pooYSBFNaFw (public, 2:37)
 
 ## About the project
 
@@ -116,7 +116,7 @@ forge, ui-kit, rovo, rovo-agent, rovo-skill, rovo-mcp, teamwork-graph, graphql, 
 
 ---
 
-# Demo video script (target 3:30, hard limit 5:00)
+# Demo video script (the original storyboard; the published video is shorter, 2:37, and follows the same flow)
 
 Recorded on the Forge demo site (one-atlas-kxyj.atlassian.net), using its fictional team: **Ada Isadora** goes on leave from tomorrow for five days; **Max Taylor**, **Cassi Owens**, **Ryan Lee** and the narrator are the team. The data lives in the projects PAY (Payments, epic PAY-1 "Refunds v2"), OPS (Platform Operations) and FIN (Finance Reporting). The numbers below were measured live on 11 Nov 2026. Due dates are relative, so check the numbers on screen on the recording day. Speak slowly; show, don't tell.
 
