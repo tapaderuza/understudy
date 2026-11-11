@@ -8,7 +8,7 @@
 import api, { route, type APIResponse } from '@forge/api';
 import { apiErrorMessage, type ApiAction, type Product } from '../core/errors';
 import type { Page, Person } from '../core/types';
-import { isAccountId, isIssueKey, parseConfluenceSearch, parsePersonResponse } from './parse';
+import { isAccountId, isIssueKey, isProjectKey, parseConfluenceSearch, parsePersonResponse } from './parse';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -101,6 +101,24 @@ export async function approximateCount(jql: string): Promise<number> {
   return n;
 }
 
+export interface ProjectRef {
+  key: string;
+  name: string;
+}
+
+/** Projects the user can browse, the ones with the most recent activity first. */
+export async function listProjects(max = 50): Promise<ProjectRef[]> {
+  const res = await json(
+    'jira',
+    await api.asUser().requestJira(route`/rest/api/3/project/search?maxResults=${max}&expand=insight`, GET),
+  );
+  const values: Json[] = Array.isArray(res?.values) ? res.values : [];
+  return values
+    .filter((p) => isProjectKey(p?.key) && p?.archived !== true)
+    .sort((a, b) => String(b?.insight?.lastIssueUpdateTime ?? '').localeCompare(String(a?.insight?.lastIssueUpdateTime ?? '')))
+    .map((p) => ({ key: String(p.key), name: String(p.name ?? p.key) }));
+}
+
 export async function getMyself(): Promise<Person> {
   const p = parsePersonResponse(await json('jira', await api.asUser().requestJira(route`/rest/api/3/myself`, GET)));
   if (!p) throw new Error('Could not read the current user.');
@@ -148,6 +166,18 @@ export async function addComment(key: string, adf: Json): Promise<string | undef
   const k = key.trim().toUpperCase();
   const res = await json('jira', await api.asUser().requestJira(route`/rest/api/3/issue/${k}/comment`, post({ body: adf })));
   return res?.id;
+}
+
+/** Replaces the body of a comment the current user wrote. */
+export async function updateComment(key: string, commentId: string, adf: Json): Promise<string> {
+  if (!isIssueKey(key)) throw new Error(`${key} is not a Jira work item key.`);
+  if (!/^\d{1,20}$/.test(commentId)) throw new Error('That is not a Jira comment ID.');
+  const k = key.trim().toUpperCase();
+  const res = await json(
+    'jira',
+    await api.asUser().requestJira(route`/rest/api/3/issue/${k}/comment/${commentId}`, { ...post({ body: adf }), method: 'PUT' }),
+  );
+  return String(res?.id ?? commentId);
 }
 
 /** Best effort: watching keeps the stand-in informed, but is not essential. */

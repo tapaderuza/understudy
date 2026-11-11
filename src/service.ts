@@ -2,27 +2,32 @@
 // the Rovo agent / MCP tools (actions), so both always give the same answer.
 import { buildBrief, type Brief } from './core/brief';
 import { settleBy } from './core/budget';
-import { checkAbsenceInput, dayInput, normaliseAbsence, returnSince, todayIn } from './core/dates';
+import { addDays, checkAbsenceInput, dayInput, normaliseAbsence, returnSince, todayIn } from './core/dates';
 import { isPlainMessage, userMessage } from './core/errors';
-import { RISK_LABELS } from './core/risk';
-import { renderHandoverPage, standInComment } from './core/render';
+import { parseStandInChoices } from './core/choices';
+import { RISK_LABELS, assessRisk } from './core/risk';
+import { renderHandoverPage, standInComment, walkthroughComment } from './core/render';
+import { TEAM_RISK_LABELS, buildTeamRisk, type TeamRisk } from './core/team';
 import { rankStandIns, type Candidate } from './core/standins';
 import type { Absence, Person, Snapshot, WorkItem } from './core/types';
 import {
   addComment,
   addWatcher,
+  updateComment,
   createPage,
   findPeople,
   getIssueRaw,
   getMyTimeZone,
   getMyself,
   getPerson,
+  listProjects,
   listSpaces,
+  searchIssues,
   spaceByKey,
 } from './adapters/atlassian';
-import { gatherReturn, gatherSnapshot } from './adapters/gather';
+import { gatherReturn, gatherSnapshot, gatherTeam } from './adapters/gather';
 import { buildWelcomeBack, type WelcomeBack } from './core/handback';
-import { isAccountId, isIssueKey, parseIssue, parsePersonResponse } from './adapters/parse';
+import { findBriefing, isAccountId, isIssueKey, parseIssue, parsePersonResponse } from './adapters/parse';
 
 /** The time zone is a nicety: never wait long for it. */
 const TIME_ZONE_BUDGET_MS = 3_000;
@@ -90,6 +95,8 @@ export interface BriefRequest {
   today?: string;
   /** The one work item the answer is about (issue panel, stand-in briefing). */
   focus?: WorkItem;
+  /** Who is asking, when known. */
+  requesterId?: string;
 }
 
 export async function prepare(req: BriefRequest): Promise<{ brief: Brief; snapshot: Snapshot; absence: Absence }> {
@@ -103,6 +110,7 @@ export async function prepare(req: BriefRequest): Promise<{ brief: Brief; snapsh
     cloudId: req.cloudId,
     person: req.person,
     focus: req.focus,
+    requesterId: req.requesterId,
   });
   const overrides = Object.fromEntries(
     Object.entries(req.overrides ?? {}).filter(([k, v]) => isIssueKey(k) && isAccountId(v)),
@@ -128,7 +136,7 @@ export async function publish(brief: Brief, space: { id?: string; key?: string }
   return { url: created.url, title: page.title };
 }
 
-export { listSpaces };
+export { listProjects, listSpaces };
 
 export const NO_ASSIGNEE = 'This work item has no assignee, so there is nobody to cover for yet. Assign it to someone to see who could stand in.';
 
@@ -143,7 +151,7 @@ export type ItemStandIns =
   | { unassigned: true; item: ItemRef; message: string };
 
 /** Ranks stand-ins for a single work item, from its assignee's context. */
-export async function standInsForItem(issueKey: string, cloudId: string | undefined): Promise<ItemStandIns> {
+export async function standInsForItem(issueKey: string, cloudId: string | undefined, requesterId?: string): Promise<ItemStandIns> {
   const [raw, today] = await Promise.all([getIssueRaw(issueKey), requesterToday()]);
   const item = parseIssue(raw);
   if (!item) throw new Error(`Could not read ${issueKey}.`);
@@ -151,7 +159,7 @@ export async function standInsForItem(issueKey: string, cloudId: string | undefi
   const owner = parsePersonResponse(raw?.fields?.assignee);
   if (!owner) return { unassigned: true, item: ref, message: NO_ASSIGNEE };
 
-  const { brief, snapshot } = await prepare({ personId: owner.accountId, cloudId, person: owner, today, focus: item });
+  const { brief, snapshot } = await prepare({ personId: owner.accountId, cloudId, person: owner, today, focus: item, requesterId });
   const target = snapshot.workItems.find((w) => w.key === item.key) ?? item;
   const candidates = rankStandIns(
     target,
@@ -169,10 +177,14 @@ export interface NotifyRequest {
   start?: unknown;
   end?: unknown;
   note?: string;
+  /** Who is asking: a briefing they already posted for this stand-in is updated, not repeated. */
+  requesterId?: string;
 }
 
 /** Comments on the item to brief the stand-in, and adds them as a watcher. */
-export async function notifyStandIn(r: NotifyRequest): Promise<{ commentId?: string; watching: boolean; message: string }> {
+export async function notifyStandIn(
+  r: NotifyRequest,
+): Promise<{ commentId?: string; watching: boolean; updated: boolean; message: string }> {
   if (!isIssueKey(r.issueKey)) throw new Error(`${r.issueKey} is not a Jira work item key.`);
   checkAbsenceInput(r.start, r.end);
   const [raw, today] = await Promise.all([getIssueRaw(r.issueKey), requesterToday()]);
@@ -190,26 +202,208 @@ export async function notifyStandIn(r: NotifyRequest): Promise<{ commentId?: str
     person: owner,
     today,
     focus: item,
+    requesterId: r.requesterId,
   });
   const entry = brief.items.find((b) => b.item.key === item.key);
   const known = entry && [entry.standIn, ...entry.alternatives].find((c) => c?.accountId === r.standIn.accountId);
 
-  const commentId = await addComment(
-    item.key,
-    standInComment({
-      itemKey: item.key,
-      standIn: r.standIn,
-      ownerName: owner.displayName,
-      absence: r.start || r.end ? absence : undefined,
-      whyItMatters: entry ? entry.risk.flags.map((f) => RISK_LABELS[f]) : [],
-      because: known ? known.reasons.filter((x) => x.points > 0).map((x) => x.text) : [],
-      note: r.note,
-    }),
-  );
+  const body = standInComment({
+    itemKey: item.key,
+    standIn: r.standIn,
+    ownerName: owner.displayName,
+    absence: r.start || r.end ? absence : undefined,
+    whyItMatters: entry ? entry.risk.flags.map((f) => RISK_LABELS[f]) : [],
+    because: known ? known.reasons.filter((x) => x.points > 0).map((x) => x.text) : [],
+    note: r.note,
+  });
+  // Briefing the same stand-in again (new dates, a better note) edits the
+  // earlier comment, so the work item never shows two briefings for one person.
+  const earlier = findBriefing(raw, r.standIn.accountId);
+  const mine = earlier && r.requesterId && earlier.authorId === r.requesterId ? earlier : undefined;
+  const { commentId, updated } = await postOrUpdate(item.key, mine?.id, body);
   const watching = await addWatcher(item.key, r.standIn.accountId);
+  const verb = updated ? 'Updated the briefing for' : 'Briefed';
   return {
     commentId,
     watching,
-    message: `Briefed ${r.standIn.displayName} on ${item.key}${watching ? ' and added them as a watcher' : ''}.`,
+    updated,
+    message: `${verb} ${r.standIn.displayName} on ${item.key}${watching ? ' and added them as a watcher' : ''}.`,
   };
+}
+
+// ---- Team knowledge risk ----
+
+/** Without projects, the team view looks at the projects of the asker's own open work. */
+export async function projectsOf(accountId: string, max = 3): Promise<string[]> {
+  if (!isAccountId(accountId)) return [];
+  const raw = await searchIssues(`assignee = "${accountId}" AND statusCategory != Done ORDER BY updated DESC`, ['project'], 50);
+  const counts = new Map<string, number>();
+  for (const r of raw) {
+    const key = r?.fields?.project?.key;
+    if (typeof key === 'string') counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([k]) => k);
+}
+
+/** Which open work in these projects only one person understands, and who should learn it. */
+export async function teamRisk(projects: string[], today?: string): Promise<TeamRisk> {
+  const day = today ?? (await requesterToday());
+  return buildTeamRisk(await gatherTeam(projects, day));
+}
+
+export interface WalkthroughRequest {
+  issueKey: string;
+  learner: Person;
+  note?: string;
+}
+
+/**
+ * Asks the owner of a work item, in a comment, to walk a colleague through it,
+ * and adds the colleague as a watcher. Never reassigns anything.
+ */
+export async function requestWalkthrough(r: WalkthroughRequest): Promise<{ commentId?: string; watching: boolean; message: string }> {
+  if (!isIssueKey(r.issueKey)) throw new Error(`${r.issueKey} is not a Jira work item key.`);
+  const [raw, today] = await Promise.all([getIssueRaw(r.issueKey), requesterToday()]);
+  const item = parseIssue(raw);
+  if (!item) throw new Error(`Could not read ${r.issueKey}.`);
+  const owner = parsePersonResponse(raw?.fields?.assignee);
+  if (!owner) throw new Error(`${item.key} has no assignee, so there is nobody to give a walkthrough yet.`);
+  if (owner.accountId === r.learner.accountId) throw new Error(`${r.learner.displayName} already owns ${item.key}.`);
+  if (isRecentWalkthrough(item.walkthrough, r.learner.accountId, today)) {
+    const watching = await addWatcher(item.key, r.learner.accountId);
+    return { watching, message: `A walkthrough of ${item.key} for ${r.learner.displayName} was already requested in the last two weeks.` };
+  }
+  const end = new Date(Date.parse(`${today}T00:00:00Z`) + 13 * 86_400_000).toISOString().slice(0, 10);
+  const risk = assessRisk(item, owner.accountId, { start: today, end }, today);
+  const commentId = await addComment(
+    item.key,
+    walkthroughComment({
+      itemKey: item.key,
+      owner,
+      learner: r.learner,
+      whyItMatters: risk.flags.map((f) => TEAM_RISK_LABELS[f]),
+      note: r.note,
+    }),
+  );
+  const watching = await addWatcher(item.key, r.learner.accountId);
+  return {
+    commentId,
+    watching,
+    message: `Asked ${owner.displayName} to walk ${r.learner.displayName} through ${item.key}${watching ? ', and added them as a watcher' : ''}.`,
+  };
+}
+
+// ---- Choices made in chat, and briefing everyone at once ----
+
+/**
+ * Stand-ins a person chose in chat ("PAY-3=Max Taylor; PAY-5: Cassi"), as
+ * issue key -> account ID. Each name is resolved like any other person input,
+ * so an ambiguous name is an error with the options, never a guess.
+ */
+export async function overridesFrom(text: unknown, requesterId?: string): Promise<Record<string, string>> {
+  const choices = parseStandInChoices(text).slice(0, MAX_CHAT_CHOICES);
+  const names = [...new Set(choices.map((c) => c.who))];
+  const people = await Promise.all(names.map((who) => resolvePerson(who, requesterId)));
+  const idOf = new Map(names.map((who, i) => [who, people[i]!.accountId]));
+  return Object.fromEntries(choices.map((c) => [c.key, idOf.get(c.who)!]));
+}
+
+/** Stand-ins changed in one chat: more than this is a new plan, not a few swaps. */
+const MAX_CHAT_CHOICES = 15;
+
+/**
+ * Updates an earlier briefing when there is one this person may edit, and
+ * posts a new comment otherwise, including when the edit is refused (the
+ * comment was deleted, or permissions changed since it was read).
+ */
+async function postOrUpdate(key: string, earlierId: string | undefined, body: Parameters<typeof addComment>[1]) {
+  if (earlierId) {
+    try {
+      return { commentId: await updateComment(key, earlierId, body), updated: true };
+    } catch (e) {
+      console.warn(`[understudy] could not update briefing on ${key}, posting a new one`, userMessage(e));
+    }
+  }
+  return { commentId: await addComment(key, body), updated: false };
+}
+
+/** A walkthrough asked for this colleague within the last two weeks. */
+export function isRecentWalkthrough(w: WorkItem['walkthrough'], learnerId: string, today: string): boolean {
+  return Boolean(w && w.learnerId === learnerId && w.at.slice(0, 10) >= addDays(today, -14));
+}
+
+/** Most briefings one call sends; the rest are listed so the page can finish them. */
+export const MAX_BULK_BRIEFINGS = 12;
+/** Stop starting new briefings after this long, well inside Forge's 25 seconds. */
+const BULK_BUDGET_MS = 12_000;
+
+export interface BriefAllRequest {
+  personId: string;
+  person?: Person;
+  start?: unknown;
+  end?: unknown;
+  cloudId?: string;
+  overrides?: Record<string, string>;
+  note?: string;
+  requesterId?: string;
+}
+
+export interface BriefAllResult {
+  briefed: { key: string; standIn: string; updated: boolean }[];
+  skipped: { key: string; reason: string }[];
+  message: string;
+}
+
+/**
+ * Briefs every stand-in in the plan in one go: one comment per work item
+ * (updating an earlier briefing for the same person), and a watcher. Items
+ * with no stand-in are reported, never guessed.
+ */
+export async function briefAllStandIns(r: BriefAllRequest): Promise<BriefAllResult> {
+  const started = Date.now();
+  const { brief, absence } = await prepare({
+    personId: r.personId,
+    person: r.person,
+    start: r.start,
+    end: r.end,
+    cloudId: r.cloudId,
+    overrides: r.overrides,
+    requesterId: r.requesterId,
+  });
+  const briefed: BriefAllResult['briefed'] = [];
+  const skipped: BriefAllResult['skipped'] = [];
+  for (const b of brief.items.filter((x) => x.risk.tier !== 'can-wait')) {
+    if (!b.standIn) {
+      skipped.push({ key: b.item.key, reason: 'No stand-in: nobody else has enough context. Book a walkthrough or choose someone.' });
+      continue;
+    }
+    if (briefed.length >= MAX_BULK_BRIEFINGS || Date.now() - started > BULK_BUDGET_MS) {
+      skipped.push({ key: b.item.key, reason: 'Not sent yet: brief this one from the Understudy page.' });
+      continue;
+    }
+    try {
+      const raw = await getIssueRaw(b.item.key);
+      const body = standInComment({
+        itemKey: b.item.key,
+        standIn: b.standIn,
+        ownerName: brief.person.displayName,
+        absence,
+        whyItMatters: b.risk.flags.map((f) => RISK_LABELS[f]),
+        because: b.standIn.reasons.filter((x) => x.points > 0).map((x) => x.text),
+        note: r.note,
+      });
+      const earlier = findBriefing(raw, b.standIn.accountId);
+      const mine = earlier && r.requesterId && earlier.authorId === r.requesterId ? earlier : undefined;
+      const { updated } = await postOrUpdate(b.item.key, mine?.id, body);
+      await addWatcher(b.item.key, b.standIn.accountId);
+      briefed.push({ key: b.item.key, standIn: b.standIn.displayName, updated });
+    } catch (e) {
+      skipped.push({ key: b.item.key, reason: userMessage(e) });
+    }
+  }
+  const people = new Set(briefed.map((x) => x.standIn)).size;
+  const main = briefed.length
+    ? `Briefed ${people} stand-in${people === 1 ? '' : 's'} on ${briefed.length} work item${briefed.length === 1 ? '' : 's'}.`
+    : 'No stand-ins were briefed.';
+  return { briefed, skipped, message: skipped.length ? `${main} ${skipped.length} not sent: see skipped.` : main };
 }

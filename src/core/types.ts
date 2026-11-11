@@ -55,6 +55,8 @@ export interface WorkItem {
   /** Keys of the unresolved items blocking this one, when known. */
   blockedBy?: string[];
   pullRequests: PullRequest[];
+  /** The latest walkthrough Understudy asked for on this item, when there is one. */
+  walkthrough?: { learner: string; learnerId: string; at: string };
 }
 
 export interface Goal {

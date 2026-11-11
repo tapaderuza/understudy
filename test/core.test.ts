@@ -160,7 +160,7 @@ describe('buildBrief', () => {
       standIns: 3,
     });
     expect(b.headline).toBe(
-      'Ana Ruiz has 5 open items: 3 must be covered from 1 Dec 2026, 2 fall due before 5 Dec 2026, 1 already overdue, 1 only Ana Ruiz has context on.',
+      'Ana Ruiz has 5 open items: 3 must be covered from 1 Dec 2026, 2 fall due by 5 Dec 2026, 1 already overdue, 1 only Ana Ruiz has context on.',
     );
   });
 

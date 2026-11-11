@@ -7,6 +7,7 @@ import ForgeReconciler, {
   DynamicTable,
   EmptyState,
   Heading,
+  HorizontalStackBarChart,
   Icon,
   Inline,
   Label,
@@ -36,7 +37,7 @@ import ForgeReconciler, {
   xcss,
 } from '@forge/react';
 import { invoke, rovo } from '@forge/bridge';
-import type { UiBrief, UiWelcomeBack } from '../resolvers';
+import type { UiBrief, UiTeamRisk, UiWelcomeBack } from '../resolvers';
 import { formatDay } from '../core/dates';
 import { Evidence, contextPoints } from './evidence';
 
@@ -1005,12 +1006,370 @@ const WelcomeBack = () => {
   );
 };
 
+type RiskItem = UiTeamRisk['atRisk'][number];
+
+const projectField = xcss({ minWidth: '320px' });
+
+/** Green for work someone else could pick up, red for work only its owner knows. */
+const CHART_COLOURS = [
+  { key: 'Someone else knows', value: '#22A06B' },
+  { key: 'Only they know', value: '#C9372C' },
+];
+
+/**
+ * Before anyone goes away: the work only one person understands, across a
+ * project, and who should learn it. A manager's view of the same evidence
+ * a handover uses.
+ */
+const TeamRisk = () => {
+  const [projects, setProjects] = useState<Option[] | null>(null);
+  const [chosen, setChosen] = useState<Option[]>([]);
+  const [data, setData] = useState<UiTeamRisk | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [learners, setLearners] = useState<Record<string, string>>({});
+  const [asked, setAsked] = useState<Record<string, Sent>>({});
+  const [asking, setAsking] = useState<string | null>(null);
+
+  useEffect(() => {
+    call<{ projects: { key: string; name: string }[]; suggested: string[] }>('listProjects').then((r) => {
+      if (isFailure(r)) {
+        setProjects([]);
+        return;
+      }
+      const options = r.projects.map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }));
+      setProjects(options);
+      const mine = options.filter((o) => r.suggested.includes(o.value));
+      setChosen(mine.length ? mine : options.slice(0, 1));
+    });
+  }, []);
+
+  const run = async () => {
+    if (!chosen.length) return;
+    setLoading(true);
+    setError(null);
+    setAsked({});
+    setLearners({});
+    const r = await call<UiTeamRisk>('teamRisk', { projects: chosen.map((o) => o.value) });
+    setLoading(false);
+    if (isFailure(r)) setError(r.error);
+    else setData(r);
+  };
+
+  const askRovo = () => {
+    const keys = chosen.map((o) => o.value).join(', ') || 'my projects';
+    rovo
+      .open({ ...AGENT, prompt: `Where is our team's knowledge held by one person in ${keys}? Who should learn what before anyone goes away?` })
+      .catch(() => setError('Rovo chat is not available on this site.'));
+  };
+
+  const backupOf = (it: RiskItem) => data?.people.find((p) => p.person.accountId === it.owner.accountId)?.backup ?? null;
+  const learnerOf = (it: RiskItem) => learners[it.key] ?? it.closest?.accountId ?? backupOf(it)?.accountId ?? '';
+
+  const askWalkthrough = async (it: RiskItem) => {
+    const learnerId = learnerOf(it);
+    if (!learnerId) return;
+    setAsking(it.key);
+    const r = await call<{ message: string }>('walkthrough', { issueKey: it.key, learnerId });
+    setAsking(null);
+    setAsked((prev) => ({ ...prev, [it.key]: isFailure(r) ? { ok: false, text: `Failed: ${r.error}` } : { ok: true, text: r.message } }));
+  };
+
+  const chart = (data?.people ?? [])
+    .filter((p) => p.open > 0)
+    .slice(0, 8)
+    .flatMap((p) => [
+      { person: p.person.displayName, kind: 'Someone else knows', items: p.open - p.solo.length },
+      { person: p.person.displayName, kind: 'Only they know', items: p.solo.length },
+    ]);
+
+  const peopleRows = (data?.people ?? []).map((p) => ({
+    key: p.person.accountId,
+    cells: [
+      { key: 'who', content: <User accountId={p.person.accountId} /> },
+      { key: 'open', content: <Text>{String(p.open)}</Text> },
+      {
+        key: 'solo',
+        content:
+          p.solo.length > 0 ? (
+            <Inline space="space.075" alignBlock="center" shouldWrap>
+              <Lozenge appearance={p.soloUrgent.length ? 'removed' : 'moved'}>{`${p.solo.length} only they know`}</Lozenge>
+              {p.soloUrgent.length > 0 && <Text size="small">{`${p.soloUrgent.length} urgent`}</Text>}
+            </Inline>
+          ) : (
+            <Lozenge appearance="success">Covered</Lozenge>
+          ),
+      },
+      {
+        key: 'ready',
+        content: (
+          <Stack space="space.050">
+            <Text size="small">{`${p.readiness}%`}</Text>
+            <ProgressBar
+              value={p.readiness / 100}
+              appearance={p.readiness >= 80 ? 'success' : 'default'}
+              ariaLabel={`${p.readiness}% ready to cover`}
+            />
+          </Stack>
+        ),
+      },
+      {
+        key: 'backup',
+        content: p.backup ? (
+          <Stack space="space.025">
+            <Text>{p.backup.displayName}</Text>
+            <Text size="small" color="color.text.subtle">
+              {p.backup.couldCover > 0 ? `Could cover ${p.backup.couldCover} of ${p.open} today` : 'Some context, needs walkthroughs'}
+            </Text>
+          </Stack>
+        ) : (
+          <Text color="color.text.subtle">Nobody yet</Text>
+        ),
+      },
+    ],
+  }));
+
+  const riskRows = (data?.atRisk ?? []).map((it) => {
+    const backup = backupOf(it);
+    const people = [
+      it.closest ? { label: `${it.closest.displayName} (closest)`, value: it.closest.accountId } : null,
+      backup && backup.accountId !== it.closest?.accountId ? { label: `${backup.displayName} (best backup)`, value: backup.accountId } : null,
+    ].filter((o): o is Option => Boolean(o));
+    const done = asked[it.key];
+    return {
+      key: it.key,
+      cells: [
+        {
+          key: 'item',
+          content: (
+            <Stack space="space.050">
+              <Inline space="space.100" alignBlock="center">
+                <Link href={it.url} openNewTab>
+                  {it.key}
+                </Link>
+                <Lozenge appearance={TIER[it.tier].appearance}>{it.tier === 'can-wait' ? 'Not urgent' : it.tier === 'must' ? 'Urgent' : 'Soon'}</Lozenge>
+              </Inline>
+              <Text>{it.summary}</Text>
+              {it.flags.length > 0 && (
+                <Text size="small" color="color.text.subtle">
+                  {it.flags.join(' · ')}
+                </Text>
+              )}
+            </Stack>
+          ),
+        },
+        { key: 'owner', content: <User accountId={it.owner.accountId} /> },
+        {
+          key: 'closest',
+          content: it.closest ? (
+            <Stack space="space.050">
+              <Text>{it.closest.displayName}</Text>
+              <Evidence name={it.closest.displayName} reasons={it.closest.reasons} points={it.closest.contextPoints} high={false} />
+            </Stack>
+          ) : (
+            <Text color="color.text.subtle">Nobody else has commented or worked nearby.</Text>
+          ),
+        },
+        {
+          key: 'act',
+          content: it.walkthrough ? (
+            <Lozenge appearance="inprogress">{`Walkthrough asked for ${it.walkthrough.learner}`}</Lozenge>
+          ) : done?.ok ? (
+            <Lozenge appearance="success">Walkthrough requested</Lozenge>
+          ) : (
+            <Stack space="space.075">
+              {people.length > 0 && (
+                <Box xcss={picker}>
+                  <Select
+                    inputId={`learner-${it.key}`}
+                    spacing="compact"
+                    options={people}
+                    value={people.find((o) => o.value === learnerOf(it)) ?? people[0]}
+                    onChange={(o: Option) => setLearners((prev) => ({ ...prev, [it.key]: o.value }))}
+                  />
+                </Box>
+              )}
+              <LoadingButton spacing="compact" isLoading={asking === it.key} isDisabled={!learnerOf(it)} onClick={() => askWalkthrough(it)}>
+                Request walkthrough
+              </LoadingButton>
+              {done && !done.ok && (
+                <Text size="small" color="color.text.danger">
+                  {done.text}
+                </Text>
+              )}
+            </Stack>
+          ),
+        },
+      ],
+    };
+  });
+
+  return (
+    <Stack space="space.300">
+      <Text>Before anyone goes away: find the work only one person understands, and who should learn it.</Text>
+      <Inline space="space.200" alignBlock="end" shouldWrap>
+        <Stack space="space.050">
+          <Label labelFor="team-projects">Projects</Label>
+          <Box xcss={projectField}>
+            {projects ? (
+              <Select
+                inputId="team-projects"
+                isMulti
+                options={projects}
+                value={chosen}
+                placeholder="Choose up to 5 projects"
+                onChange={(v: Option[] | Option | null) => setChosen((Array.isArray(v) ? v : v ? [v] : []).slice(0, 5))}
+              />
+            ) : (
+              <Spinner label="Loading projects" />
+            )}
+          </Box>
+        </Stack>
+        <LoadingButton appearance="primary" isLoading={loading} isDisabled={!chosen.length} onClick={run}>
+          Check knowledge risk
+        </LoadingButton>
+        <Button appearance="subtle" onClick={askRovo}>
+          Ask Understudy in Rovo
+        </Button>
+      </Inline>
+
+      {error && (
+        <SectionMessage appearance="error" title="Something went wrong">
+          <Text>{error}</Text>
+        </SectionMessage>
+      )}
+
+      {!data && !loading && (
+        <EmptyState
+          header="Who is the only one who knows?"
+          headingLevel={2}
+          description="Understudy checks every open work item in the projects you choose with the same evidence as a handover (comments, the same epic, components, labels and recent work) and finds the items nobody else could pick up today."
+          primaryAction={
+            <Button appearance="primary" isDisabled={!chosen.length} onClick={run}>
+              Check knowledge risk
+            </Button>
+          }
+        />
+      )}
+
+      {loading && (
+        <Box padding="space.400">
+          <Stack space="space.150" alignInline="center">
+            <Spinner size="large" label="Checking" />
+            <Text color="color.text.subtle">Reading open work, comments and who worked where in the last 90 days</Text>
+          </Stack>
+        </Box>
+      )}
+
+      {data && !loading && (
+        <Stack space="space.300">
+          <Box xcss={card}>
+            <Stack space="space.200">
+              <Inline space="space.150" alignBlock="center" spread="space-between" shouldWrap>
+                <Heading size="medium" as="h2">
+                  Knowledge risk
+                </Heading>
+                {data.stats.solo > 0 ? (
+                  <Lozenge appearance="removed">{`${plural(data.stats.solo, 'single point')} of knowledge`}</Lozenge>
+                ) : (
+                  <Lozenge appearance="success">No single points of knowledge</Lozenge>
+                )}
+              </Inline>
+              <Text>{data.headline}</Text>
+              <Stack space="space.075">
+                <Text size="small">
+                  <Strong>{`Cover readiness ${data.stats.readiness}%`}</Strong>: the share of open work someone else could pick up today.
+                </Text>
+                <ProgressBar
+                  value={data.stats.readiness / 100}
+                  appearance={data.stats.readiness >= 80 ? 'success' : 'default'}
+                  ariaLabel={`Cover readiness ${data.stats.readiness}%`}
+                />
+              </Stack>
+              <Inline space="space.150" shouldWrap>
+                <Stat value={data.stats.checked} label="Open items checked" glyph="work-items" />
+                <Stat value={data.stats.solo} label="Only one person knows" glyph="person-warning" warning={data.stats.solo > 0} />
+                <Stat value={data.stats.soloUrgent} label="Of those, urgent soon" glyph="flag" warning={data.stats.soloUrgent > 0} />
+                <Stat value={data.stats.people} label="People with open work" glyph="people-group" />
+              </Inline>
+            </Stack>
+          </Box>
+
+          {chart.length > 0 && (
+            <HorizontalStackBarChart
+              data={chart}
+              xAccessor="person"
+              yAccessor="items"
+              colorAccessor="kind"
+              colorPalette={CHART_COLOURS}
+              title="Who holds knowledge alone"
+              subtitle="Open items per person, and whether anyone else has context on them"
+              height={Math.max(220, 26 * chart.length + 110)}
+              hideMenu
+            />
+          )}
+
+          <Stack space="space.100">
+            <Heading size="small" as="h3">
+              Work only one person knows
+            </Heading>
+            <Text size="small" color="color.text.subtle">
+              Nobody else has 3 or more points of evidence on these. A 15-minute walkthrough now saves a scramble when the owner is away.
+            </Text>
+            <DynamicTable
+              label="Work only one person knows"
+              head={{
+                cells: [
+                  { key: 'item', content: 'Work item', width: 34 },
+                  { key: 'owner', content: 'Only they know', width: 16 },
+                  { key: 'closest', content: 'Closest colleague and evidence', width: 28 },
+                  { key: 'act', content: 'Spread the knowledge', width: 22 },
+                ],
+              }}
+              rows={riskRows}
+              rowsPerPage={10}
+              emptyView={<EmptyState header="Every open item has a backup" headingLevel={3} width="narrow" />}
+            />
+          </Stack>
+
+          <Stack space="space.100">
+            <Heading size="small" as="h3">
+              People
+            </Heading>
+            <DynamicTable
+              label="Cover readiness per person"
+              head={{
+                cells: [
+                  { key: 'who', content: 'Person', width: 24 },
+                  { key: 'open', content: 'Open items', width: 10 },
+                  { key: 'solo', content: 'Only they know', width: 22 },
+                  { key: 'ready', content: 'Ready to cover', width: 18 },
+                  { key: 'backup', content: 'Best backup', width: 26 },
+                ],
+              }}
+              rows={peopleRows}
+              rowsPerPage={10}
+            />
+          </Stack>
+
+          {data.notes.map((n) => (
+            <Text key={n} size="small" color="color.text.subtle">
+              {n}
+            </Text>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+};
+
 const App = () => (
   <Stack space="space.200">
     <Tabs id="mode">
       <TabList>
         <Tab>Before you go</Tab>
         <Tab>Welcome back</Tab>
+        <Tab>Team risk</Tab>
       </TabList>
       <TabPanel>
         <Box paddingBlockStart="space.200">
@@ -1020,6 +1379,11 @@ const App = () => (
       <TabPanel>
         <Box paddingBlockStart="space.200">
           <WelcomeBack />
+        </Box>
+      </TabPanel>
+      <TabPanel>
+        <Box paddingBlockStart="space.200">
+          <TeamRisk />
         </Box>
       </TabPanel>
     </Tabs>

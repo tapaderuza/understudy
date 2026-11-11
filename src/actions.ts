@@ -9,7 +9,21 @@ import { toAgentView } from './core/brief';
 import { checkAbsenceInput, dayInput } from './core/dates';
 import { toAgentReturnView } from './core/handback';
 import { isIssueKey } from './adapters/parse';
-import { failure, notifyStandIn, prepare, publish, resolvePerson, standInsForItem, welcomeBack } from './service';
+import { toAgentTeamView } from './core/team';
+import {
+  briefAllStandIns,
+  failure,
+  notifyStandIn,
+  overridesFrom,
+  prepare,
+  projectsOf,
+  publish,
+  requestWalkthrough,
+  resolvePerson,
+  standInsForItem,
+  teamRisk,
+  welcomeBack,
+} from './service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -41,6 +55,7 @@ export async function getHandoverBrief(payload: Json, context: Json) {
       start: payload?.startDate,
       end: payload?.endDate,
       cloudId: cloudOf(payload, context),
+      requesterId: requester,
     });
     return toAgentView(brief);
   } catch (e) {
@@ -62,7 +77,7 @@ export async function suggestStandIns(payload: Json, context: Json) {
   try {
     const key = issueKeyOf(payload);
     if (!key) throw new Error('Tell me which work item, for example PAY-101.');
-    const r = await standInsForItem(key, cloudOf(payload, context));
+    const r = await standInsForItem(key, cloudOf(payload, context), requesterOf(payload, context));
     if (r.unassigned) return { item: r.item, owner: null, whyItMatters: [], candidates: [], note: r.message };
     const entry = r.brief.items.find((b) => b.item.key === key);
     return {
@@ -88,13 +103,16 @@ export async function publishHandoverPage(payload: Json, context: Json) {
     const spaceKey = typeof payload?.spaceKey === 'string' ? payload.spaceKey.trim() : '';
     if (!spaceKey) throw new Error('Which Confluence space should the handover page go in? Give its space key.');
     checkAbsenceInput(payload?.startDate, payload?.endDate);
-    const person = await resolvePerson(payload?.person, requesterOf(payload, context));
+    const requester = requesterOf(payload, context);
+    const person = await resolvePerson(payload?.person, requester);
     const { brief } = await prepare({
       personId: person.accountId,
       person,
       start: payload?.startDate,
       end: payload?.endDate,
       cloudId: cloudOf(payload, context),
+      overrides: await overridesFrom(payload?.standIns, requester),
+      requesterId: requester,
     });
     const page = await publish(brief, { key: spaceKey });
     return { published: true, title: page.title, url: page.url, headline: brief.headline };
@@ -118,8 +136,64 @@ export async function briefStandIn(payload: Json, context: Json) {
       start: payload?.startDate,
       end: payload?.endDate,
       note: typeof payload?.note === 'string' ? payload.note : undefined,
+      requesterId: requester,
     });
   } catch (e) {
     return failure(e, 'brief-stand-in');
+  }
+}
+
+/** "PAY, OPS" or "pay ops" as project keys; anything that is not a key is dropped. */
+function projectKeysOf(input: unknown): string[] {
+  if (typeof input !== 'string') return [];
+  return input
+    .split(/[\s,;]+/)
+    .map((k) => k.trim().toUpperCase())
+    .filter((k) => /^[A-Z][A-Z0-9_]{0,49}$/.test(k));
+}
+
+export async function getTeamKnowledgeRisk(payload: Json, context: Json) {
+  try {
+    let keys = projectKeysOf(payload?.projects);
+    if (keys.length === 0) {
+      const requester = requesterOf(payload, context);
+      keys = requester ? await projectsOf(requester) : [];
+      if (keys.length === 0) throw new Error('Which Jira projects should I check? Give one or more project keys, for example PAY.');
+    }
+    return toAgentTeamView(await teamRisk(keys));
+  } catch (e) {
+    return failure(e, 'get-team-knowledge-risk');
+  }
+}
+
+export async function requestWalkthroughAction(payload: Json, context: Json) {
+  try {
+    const key = issueKeyOf(payload);
+    if (!key) throw new Error('Tell me which work item, for example PAY-101.');
+    if (typeof payload?.learner !== 'string' || !payload.learner.trim()) throw new Error('Who should learn this work item?');
+    const learner = await resolvePerson(payload.learner, requesterOf(payload, context));
+    return await requestWalkthrough({ issueKey: key, learner, note: typeof payload?.note === 'string' ? payload.note : undefined });
+  } catch (e) {
+    return failure(e, 'request-walkthrough');
+  }
+}
+
+export async function briefAllStandInsAction(payload: Json, context: Json) {
+  try {
+    checkAbsenceInput(payload?.startDate, payload?.endDate);
+    const requester = requesterOf(payload, context);
+    const person = await resolvePerson(payload?.person, requester);
+    return await briefAllStandIns({
+      personId: person.accountId,
+      person,
+      start: payload?.startDate,
+      end: payload?.endDate,
+      cloudId: cloudOf(payload, context),
+      overrides: await overridesFrom(payload?.standIns, requester),
+      note: typeof payload?.note === 'string' ? payload.note : undefined,
+      requesterId: requester,
+    });
+  } catch (e) {
+    return failure(e, 'brief-all-stand-ins');
   }
 }

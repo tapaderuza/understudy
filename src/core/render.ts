@@ -201,3 +201,33 @@ export function standInComment(c: StandInCommentInput): AdfNode {
   content.push(paragraph(text('Sent with Understudy.', [{ type: 'em' }])));
   return { type: 'doc', version: 1, content };
 }
+
+export interface WalkthroughCommentInput {
+  itemKey: string;
+  owner: { accountId: string; displayName: string };
+  learner: { accountId: string; displayName: string };
+  whyItMatters: string[];
+  note?: string;
+}
+
+/**
+ * Asks the only person with context on an item to walk a colleague through
+ * it, so the work can be covered when they are away. Ends with a signature
+ * (WALKTHROUGH_SIGNATURE in adapters/parse) so it never counts as evidence.
+ */
+export function walkthroughComment(c: WalkthroughCommentInput): AdfNode {
+  const content: AdfNode[] = [
+    paragraph(
+      { type: 'mention', attrs: { id: c.owner.accountId, text: `@${c.owner.displayName}` } },
+      text(' could you give '),
+      { type: 'mention', attrs: { id: c.learner.accountId, text: `@${c.learner.displayName}` } },
+      text(
+        ` a 15-minute walkthrough of ${c.itemKey}? Right now nobody else has context on it, so it would be hard to cover if you were away.`,
+      ),
+    ),
+  ];
+  if (c.whyItMatters.length) content.push(paragraph(strong('Why it matters: '), text(c.whyItMatters.join(', '))));
+  if (c.note && c.note.trim()) content.push(paragraph(strong('Note: '), text(c.note.trim().slice(0, 2000))));
+  content.push(paragraph(text('Requested with Understudy.', [{ type: 'em' }])));
+  return { type: 'doc', version: 1, content };
+}

@@ -58,7 +58,7 @@ function comments(fields: Json): Activity[] {
   const list: Json[] = fields?.comment?.comments ?? [];
   return list
     // A briefing Understudy posted is not evidence that its sender knows the work.
-    .filter((c) => isActivePerson(c?.author) && !adfText(c?.body).includes(UNDERSTUDY_SIGNATURE))
+    .filter((c) => isActivePerson(c?.author) && !isUnderstudyComment(c?.body))
     .map((c) => ({ accountId: str(c?.author?.accountId), displayName: str(c?.author?.displayName) ?? 'Unknown user', at: str(c?.created) }))
     .filter((c): c is Activity => Boolean(c.accountId && c.at))
     .sort((a, b) => a.at.localeCompare(b.at));
@@ -90,7 +90,23 @@ export function parseIssue(raw: Json): WorkItem | undefined {
     blocked: blockers(f.issuelinks).length > 0,
     blockedBy: blockers(f.issuelinks),
     pullRequests: [],
+    walkthrough: walkthroughOf(f),
   };
+}
+
+/** The latest walkthrough Understudy asked for on this item: who should learn it, and when. */
+function walkthroughOf(fields: Json): WorkItem['walkthrough'] {
+  const list: Json[] = fields?.comment?.comments ?? [];
+  let found: WorkItem['walkthrough'];
+  for (const c of list) {
+    const at = str(c?.created);
+    if (!at || !signedWith(c?.body, WALKTHROUGH_SIGNATURE)) continue;
+    // "@Owner could you give @Learner a 15-minute walkthrough...": the learner is the second mention.
+    const mention = mentionsOf(c?.body)[1];
+    const learner = mention?.text.replace(/^@/, '');
+    if (mention && learner && (!found || at > found.at)) found = { learner, learnerId: mention.id, at };
+  }
+  return found;
 }
 
 export function parsePeerWork(raw: Json): PeerWork | undefined {
@@ -238,6 +254,45 @@ export function adfMentions(node: Json, out: string[] = []): string[] {
 // ---- What happened to someone's work while they were away ----
 
 const UNDERSTUDY_SIGNATURE = 'Sent with Understudy';
+/** Ends a walkthrough request (core/render). Like a briefing, it is not evidence that its sender knows the work. */
+export const WALKTHROUGH_SIGNATURE = 'Requested with Understudy';
+
+/**
+ * True when a comment ends with this signature as its own last paragraph,
+ * the way Understudy writes it. Text a person typed into a note elsewhere in
+ * the comment can never make it count.
+ */
+function signedWith(body: Json, signature: string): boolean {
+  const last = Array.isArray(body?.content) ? body.content[body.content.length - 1] : undefined;
+  return adfText(last).replace(/\.$/, '') === signature;
+}
+
+const isUnderstudyComment = (body: Json) => signedWith(body, UNDERSTUDY_SIGNATURE) || signedWith(body, WALKTHROUGH_SIGNATURE);
+
+/**
+ * The latest briefing Understudy posted on this work item for one stand-in,
+ * so briefing again updates it instead of adding a second comment.
+ */
+export function findBriefing(raw: Json, standInId: string): { id: string; authorId?: string; at: string } | undefined {
+  let found: { id: string; authorId?: string; at: string } | undefined;
+  for (const c of raw?.fields?.comment?.comments ?? []) {
+    const id = str(c?.id);
+    const at = str(c?.created);
+    if (!id || !at || !signedWith(c?.body, UNDERSTUDY_SIGNATURE)) continue;
+    const first = c?.body?.content?.[0]?.content?.[0];
+    if (first?.type !== 'mention' || first?.attrs?.id !== standInId) continue;
+    if (!found || at > found.at) found = { id, authorId: str(c?.author?.accountId), at };
+  }
+  return found;
+}
+
+/** Every mention in an ADF document, in order. */
+function mentionsOf(node: Json, out: { id: string; text: string }[] = []): { id: string; text: string }[] {
+  if (!node || typeof node !== 'object') return out;
+  if (node.type === 'mention' && str(node.attrs?.id)) out.push({ id: node.attrs.id, text: str(node.attrs?.text) ?? '@someone' });
+  if (Array.isArray(node.content)) node.content.forEach((c: Json) => mentionsOf(c, out));
+  return out;
+}
 
 /** Briefings are usually sent in the days before someone leaves, so look this far back for one. */
 const BRIEFING_LOOKBACK_DAYS = 14;
@@ -275,7 +330,7 @@ export function parseReturnIssue(raw: Json, personId: string, since: string): Re
     // A briefing names the stand-in whoever sent it, most often the person
     // themselves just before leaving, so it is read before the author and
     // date checks below. It is never an event to catch up on. The latest wins.
-    if (text.includes(UNDERSTUDY_SIGNATURE)) {
+    if (signedWith(c?.body, UNDERSTUDY_SIGNATURE)) {
       if (at >= briefedFrom) coveredBy = str(c?.body?.content?.[0]?.content?.[0]?.attrs?.text)?.replace(/^@/, '') ?? coveredBy;
       continue;
     }

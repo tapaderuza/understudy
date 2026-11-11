@@ -28,15 +28,20 @@ modules:
         - Who should cover the work item I am looking at?
         - What do only I know about before I go on leave?
         - I'm back. What changed and what needs me first?
+        - Where is our team's knowledge held by one person?
       actions:
         - get-handover-brief
         - suggest-stand-ins
         - publish-handover-page
         - brief-stand-in
+        - brief-all-stand-ins
         - get-welcome-back-brief
+        - get-team-knowledge-risk
+        - request-walkthrough
       skills:
         - handover-planner
         - welcome-back
+        - knowledge-risk
 
   rovo:skill:
     - key: handover-planner
@@ -48,12 +53,20 @@ modules:
           - suggest-stand-ins
           - publish-handover-page
           - brief-stand-in
+          - brief-all-stand-ins
     - key: welcome-back
       source:
         dir: skills/welcome-back
       dependencies:
         tools:
           - get-welcome-back-brief
+    - key: knowledge-risk
+      source:
+        dir: skills/knowledge-risk
+      dependencies:
+        tools:
+          - get-team-knowledge-risk
+          - request-walkthrough
 
   rovo:mcp:
     - key: understudy-mcp
@@ -63,7 +76,10 @@ modules:
         - suggest-stand-ins
         - publish-handover-page
         - brief-stand-in
+        - brief-all-stand-ins
         - get-welcome-back-brief
+        - get-team-knowledge-risk
+        - request-walkthrough
 
   action:
     - key: get-welcome-back-brief
@@ -161,6 +177,13 @@ modules:
           type: string
           required: false
           description: "Last day of the absence, inclusive, as YYYY-MM-DD."
+        standIns:
+          title: Stand-ins chosen by the user
+          type: string
+          required: false
+          description: "Only when the user changed a suggested stand-in: pairs of work item
+            key and person, such as PAY-3=Max Taylor; PAY-5=Cassi Owens. Leave empty to
+            use the suggestions."
 
     - key: brief-stand-in
       name: Brief a stand-in
@@ -200,6 +223,88 @@ modules:
           required: false
           description: "Last day of the absence, inclusive, as YYYY-MM-DD."
 
+    - key: brief-all-stand-ins
+      name: Brief all stand-ins
+      function: brief-all-fn
+      actionVerb: CREATE
+      description: >-
+        Briefs every stand-in in a handover plan at once (a comment per work
+        item and a watcher); an earlier briefing for the same person is
+        updated. Call only after the user confirms the plan.
+      inputs:
+        person:
+          title: Person
+          type: string
+          required: false
+          description: "Display name or account ID of the person going away. Empty or 'me'
+            means the current user."
+        startDate:
+          title: First day away
+          type: string
+          required: false
+          description: "First day of the absence as YYYY-MM-DD."
+        endDate:
+          title: Last day away
+          type: string
+          required: false
+          description: "Last day of the absence, inclusive, as YYYY-MM-DD."
+        standIns:
+          title: Stand-ins chosen by the user
+          type: string
+          required: false
+          description: "Only when the user changed a suggested stand-in: pairs of work item
+            key and person, such as PAY-3=Max Taylor; PAY-5=Cassi Owens. Leave empty to
+            use the suggestions."
+        note:
+          title: Note
+          type: string
+          required: false
+          description: "Optional context for every stand-in, such as where the runbook is."
+
+    - key: get-team-knowledge-risk
+      name: Get team knowledge risk
+      function: team-fn
+      actionVerb: GET
+      description: >-
+        For one or more Jira projects: which open work items only one person
+        has context on (single points of knowledge), how ready the team is to
+        cover each person, and the colleague best placed to learn each item.
+      inputs:
+        projects:
+          title: Projects
+          type: string
+          required: false
+          description: "Jira project keys separated by commas, for example PAY, OPS. Empty
+            means the projects of the current user's open work."
+
+    - key: request-walkthrough
+      name: Request a walkthrough
+      function: walkthrough-fn
+      actionVerb: CREATE
+      description: >-
+        Comments on a Jira work item to ask its assignee for a 15-minute
+        walkthrough with a colleague, so someone else has context before
+        anyone goes away, and adds the colleague as a watcher. Call only after
+        the user confirms the work item and the colleague.
+      inputs:
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: "Jira work item key such as PAY-101. If empty, the work item the
+            user is viewing is used."
+        learner:
+          title: Colleague
+          type: string
+          required: true
+          description: "Display name or account ID of the colleague who should learn the
+            work item."
+        note:
+          title: Note
+          type: string
+          required: false
+          description: "Optional context, such as a suggested time."
+
   function:
     - key: resolver
       handler: index.handler
@@ -213,6 +318,12 @@ modules:
       handler: index.briefStandIn
     - key: welcome-fn
       handler: index.getWelcomeBackBrief
+    - key: brief-all-fn
+      handler: index.briefAllStandInsAction
+    - key: team-fn
+      handler: index.getTeamKnowledgeRisk
+    - key: walkthrough-fn
+      handler: index.requestWalkthroughAction
 
 resources:
   - key: main

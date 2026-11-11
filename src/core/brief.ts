@@ -199,7 +199,7 @@ export function headlineFor(name: string, absence: Absence, st: BriefStats): str
   ];
   const details: string[] = [];
   if (st.must > 0) details.push(`${st.must} must be covered from ${formatDay(absence.start)}`);
-  if (st.dueWhileAway > 0) details.push(`${st.dueWhileAway} fall${st.dueWhileAway === 1 ? 's' : ''} due before ${formatDay(absence.end)}`);
+  if (st.dueWhileAway > 0) details.push(`${st.dueWhileAway} fall${st.dueWhileAway === 1 ? 's' : ''} due by ${formatDay(absence.end)}`);
   if (st.overdue > 0) details.push(`${st.overdue} already overdue`);
   if (st.soloKnowledge > 0) details.push(`${st.soloKnowledge} only ${name} has context on`);
   return details.length ? `${parts[0]}: ${details.join(', ')}.` : `${parts[0]}, none of them urgent.`;

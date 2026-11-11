@@ -5,9 +5,21 @@ import { pause, settleBy, type Settled } from '../core/budget';
 import { isIsoDay } from '../core/dates';
 import { userMessage } from '../core/errors';
 import type { ReturnItem } from '../core/handback';
+import type { OwnedItem, TeamSnapshot } from '../core/team';
 import type { Absence, Page, Person, Snapshot, Sources, WorkItem } from '../core/types';
 import { ApiError, ISSUE_FIELDS, approximateCount, getPerson, recentPagesBy, searchIssues } from './atlassian';
-import { countByAssignee, isAccountId, isProjectKey, parseIssue, parsePeerWork, parseReturnIssue, quoteIds, siteFromSelf } from './parse';
+import {
+  countByAssignee,
+  isAccountId,
+  isActivePerson,
+  isProjectKey,
+  parseIssue,
+  parsePeerWork,
+  parsePersonResponse,
+  parseReturnIssue,
+  quoteIds,
+  siteFromSelf,
+} from './parse';
 import { readGraph, type GraphContext } from './twg';
 
 const MAX_ITEMS = 100;
@@ -66,7 +78,7 @@ async function openLoadOf(ids: string[]): Promise<{ counts: Record<string, numbe
 }
 
 /** Load per possible stand-in, with a note when some or all of it could not be read. */
-async function loadOf(ids: string[]): Promise<{ counts: Record<string, number>; note?: string }> {
+export async function loadOf(ids: string[]): Promise<{ counts: Record<string, number>; note?: string }> {
   try {
     const { counts, missing } = await openLoadOf(ids);
     return missing
@@ -112,6 +124,8 @@ export interface GatherOptions {
   focus?: WorkItem;
   /** Milliseconds the optional sources may take in total. */
   budgetMs?: number;
+  /** Who is asking: their teams help find the person's teams in Teamwork Graph. */
+  requesterId?: string;
 }
 
 export interface ReturnGather {
@@ -197,7 +211,7 @@ export async function gatherSnapshot(o: GatherOptions): Promise<Snapshot> {
       : Promise.resolve<Settled<SearchResult>>({ state: 'ok', value: [] }),
     // Pages are not needed to cover one work item, so the issue panel skips Confluence.
     focus ? Promise.resolve(undefined) : settleBy(deadline, () => recentPagesBy(o.personId)),
-    settleBy(deadline, () => readGraph(o.personId, graphItems, o.cloudId)),
+    settleBy(deadline, () => readGraph(o.personId, graphItems, o.cloudId, o.requesterId)),
   ]);
 
   const peerWork = peerRes.state === 'ok' ? peerRes.value.map(parsePeerWork).filter((p): p is NonNullable<typeof p> => Boolean(p)) : [];
@@ -274,4 +288,85 @@ export async function gatherSnapshot(o: GatherOptions): Promise<Snapshot> {
     openTotal,
     sources,
   };
+}
+
+/** The team view reads at most this many open items, the most urgent first. */
+export const MAX_TEAM_ITEMS = 100;
+/** And this many recently updated items to learn who has worked where. */
+const MAX_TEAM_PEER_ITEMS = 300;
+const MAX_TEAM_PROJECTS = 5;
+
+/**
+ * Open assigned work in up to five projects, with the recent work that shows
+ * who else knows it. Reading load is optional and shares the time budget.
+ */
+export async function gatherTeam(projects: string[], today: string, budgetMs = OPTIONAL_BUDGET_MS): Promise<TeamSnapshot> {
+  const keys = [...new Set(projects.map((p) => p.trim().toUpperCase()))].filter(isProjectKey).slice(0, MAX_TEAM_PROJECTS);
+  if (keys.length === 0) throw new Error('Choose at least one Jira project.');
+  const deadline = Date.now() + budgetMs;
+  const notes: string[] = [];
+  // Quoted, so a project whose key is a JQL word (such as IN or OR) still works.
+  const scope = `project in (${keys.map((k) => `"${k}"`).join(', ')})`;
+
+  const [main, peerRes] = await Promise.all([
+    settleBy(deadline, () =>
+      searchIssues(
+        `${scope} AND statusCategory != Done AND assignee is not EMPTY ORDER BY priority DESC, duedate ASC`,
+        [...ISSUE_FIELDS, 'assignee'],
+        MAX_TEAM_ITEMS,
+      ),
+    ),
+    settleBy(deadline, () =>
+      searchIssues(
+        `${scope} AND assignee is not EMPTY AND updated >= -90d ORDER BY updated DESC`,
+        ['assignee', 'project', 'parent', 'labels', 'components', 'updated'],
+        MAX_TEAM_PEER_ITEMS,
+      ),
+    ),
+  ]);
+
+  if (main.state === 'timeout') throw new Error('Jira took too long to list the open work in these projects. Try fewer projects.');
+  if (main.state === 'error') throw main.error;
+  const raw = main.value;
+  const items: OwnedItem[] = [];
+  for (const r of raw) {
+    const item = parseIssue(r);
+    const owner = isActivePerson(r?.fields?.assignee) ? parsePersonResponse(r.fields.assignee) : undefined;
+    if (item && owner) items.push({ item, owner });
+  }
+
+  const peerWork = peerRes.state === 'ok' ? peerRes.value.map(parsePeerWork).filter((p): p is NonNullable<typeof p> => Boolean(p)) : [];
+  if (peerRes.state === 'timeout') notes.push('Recent work in these projects took too long to read, so only comments count as context.');
+  if (peerRes.state === 'error') notes.push(`Could not read recent work in these projects: ${userMessage(peerRes.error)}`);
+
+  // Load matters less here than in a handover (nothing is assigned), but it
+  // keeps "who could cover" honest about people who are already stretched.
+  const ids = [
+    ...new Set([
+      ...items.flatMap((o) => o.item.comments.map((c) => c.accountId)),
+      ...peerWork.map((p) => p.accountId),
+      ...items.map((o) => o.owner.accountId),
+    ]),
+  ]
+    .filter(isAccountId)
+    .slice(0, MAX_CANDIDATES);
+  let openLoad: Record<string, number> = {};
+  if (ids.length) {
+    const load = await settleBy(deadline, () => loadOf(ids));
+    if (load.state === 'ok') {
+      openLoad = load.value.counts;
+      if (load.value.note) notes.push(load.value.note);
+    } else {
+      notes.push(load.state === 'timeout' ? "People's current load took too long to read, so it is not counted." : `Could not read people's current load: ${userMessage(load.error)}`);
+    }
+  }
+
+  let openTotal: number | undefined;
+  if (raw.length >= MAX_TEAM_ITEMS) {
+    const total = await settleBy(deadline, () => approximateCount(`${scope} AND statusCategory != Done AND assignee is not EMPTY`));
+    openTotal = total.state === 'ok' ? total.value : undefined;
+    notes.push(`These projects have more open items than Understudy reads at once; this view checks the ${MAX_TEAM_ITEMS} most urgent.`);
+  }
+
+  return { projects: keys, today, items, peerWork, openLoad, openTotal, notes };
 }

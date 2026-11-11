@@ -7,7 +7,21 @@ import { getMyself, getPerson } from './adapters/atlassian';
 import { isAccountId } from './adapters/parse';
 import { confidenceOf, contextPointsOf } from './core/standins';
 import { RETURN_LABELS } from './core/handback';
-import { failure, listSpaces, notifyStandIn, prepare, publish, standInsForItem, welcomeBack } from './service';
+import { addDays } from './core/dates';
+import { TEAM_RISK_LABELS, evidenceOf, type TeamRisk } from './core/team';
+import {
+  failure,
+  listProjects,
+  listSpaces,
+  notifyStandIn,
+  prepare,
+  projectsOf,
+  publish,
+  requestWalkthrough,
+  standInsForItem,
+  teamRisk,
+  welcomeBack,
+} from './service';
 
 const resolver = new Resolver();
 
@@ -68,7 +82,14 @@ resolver.define('buildBrief', async ({ payload, context }) => {
   try {
     const p = (payload ?? {}) as BriefPayload;
     const personId = isAccountId(p.accountId) ? p.accountId : context.accountId;
-    const { brief } = await prepare({ personId, start: p.start, end: p.end, cloudId: context.cloudId, overrides: p.overrides });
+    const { brief } = await prepare({
+      personId,
+      start: p.start,
+      end: p.end,
+      cloudId: context.cloudId,
+      overrides: p.overrides,
+      requesterId: context.accountId,
+    });
     return forUi(brief);
   } catch (e) {
     return failure(e, 'buildBrief');
@@ -87,7 +108,14 @@ resolver.define('publish', async ({ payload, context }) => {
   try {
     const p = (payload ?? {}) as BriefPayload & { spaceId?: string };
     const personId = isAccountId(p.accountId) ? p.accountId : context.accountId;
-    const { brief } = await prepare({ personId, start: p.start, end: p.end, cloudId: context.cloudId, overrides: p.overrides });
+    const { brief } = await prepare({
+      personId,
+      start: p.start,
+      end: p.end,
+      cloudId: context.cloudId,
+      overrides: p.overrides,
+      requesterId: context.accountId,
+    });
     return await publish(brief, { id: p.spaceId });
   } catch (e) {
     return failure(e, 'publish');
@@ -106,6 +134,7 @@ resolver.define('notify', async ({ payload, context }) => {
       start: p.start,
       end: p.end,
       note: p.note,
+      requesterId: context.accountId,
     });
   } catch (e) {
     return failure(e, 'notify');
@@ -131,7 +160,7 @@ resolver.define('issueStandIns', async ({ context }) => {
   try {
     const key = context?.extension?.issue?.key;
     if (typeof key !== 'string') throw new Error('Open a work item to see who could cover it.');
-    const r = await standInsForItem(key, context.cloudId);
+    const r = await standInsForItem(key, context.cloudId, context.accountId);
     if (r.unassigned) {
       const none: IssuePanelData = {
         item: r.item,
@@ -193,6 +222,72 @@ export type IssuePanelData = {
   /** Sources left out because they failed or were slow, in plain words. Empty when everything answered. */
   notes: string[];
 };
+
+/** The team view without comment histories: small enough for the page. */
+function teamForUi(t: TeamRisk) {
+  return {
+    projects: t.projects,
+    today: t.today,
+    window: t.window,
+    headline: t.headline,
+    stats: t.stats,
+    people: t.people.slice(0, 30).map((p) => ({
+      person: p.person,
+      open: p.open,
+      solo: p.solo,
+      soloUrgent: p.soloUrgent,
+      readiness: p.readiness,
+      backup: p.backup ?? null,
+    })),
+    atRisk: t.atRisk.slice(0, 50).map((x) => ({
+      key: x.item.key,
+      summary: x.item.summary,
+      url: x.item.url,
+      status: x.item.status,
+      dueDate: x.item.dueDate ?? null,
+      tier: x.risk.tier,
+      flags: x.risk.flags.map((f) => TEAM_RISK_LABELS[f]),
+      owner: x.owner,
+      closest: x.closest
+        ? { accountId: x.closest.accountId, displayName: x.closest.displayName, reasons: evidenceOf(x.closest), contextPoints: contextPointsOf(x.closest) }
+        : null,
+      walkthrough: x.item.walkthrough && x.item.walkthrough.at.slice(0, 10) >= addDays(t.today, -14) ? x.item.walkthrough : null,
+    })),
+    notes: t.notes,
+  };
+}
+
+export type UiTeamRisk = ReturnType<typeof teamForUi>;
+
+resolver.define('listProjects', async ({ context }) => {
+  try {
+    const [projects, mine] = await Promise.all([listProjects(), projectsOf(context.accountId).catch(() => [] as string[])]);
+    return { projects, suggested: mine };
+  } catch (e) {
+    return failure(e, 'listProjects');
+  }
+});
+
+resolver.define('teamRisk', async ({ payload }) => {
+  try {
+    const p = (payload ?? {}) as { projects?: unknown };
+    const keys = Array.isArray(p.projects) ? p.projects.filter((x): x is string => typeof x === 'string') : [];
+    return teamForUi(await teamRisk(keys));
+  } catch (e) {
+    return failure(e, 'teamRisk');
+  }
+});
+
+resolver.define('walkthrough', async ({ payload }) => {
+  try {
+    const p = (payload ?? {}) as { issueKey?: string; learnerId?: string; note?: string };
+    if (!isAccountId(p.learnerId)) throw new Error('Pick who should learn this work item first.');
+    const learner = await getPerson(p.learnerId);
+    return await requestWalkthrough({ issueKey: String(p.issueKey ?? ''), learner, note: p.note });
+  } catch (e) {
+    return failure(e, 'walkthrough');
+  }
+});
 
 type WelcomeBackResult = Awaited<ReturnType<typeof welcomeBack>>;
 export type UiWelcomeBack = Omit<WelcomeBackResult, 'items'> & {

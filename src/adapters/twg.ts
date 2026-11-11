@@ -22,7 +22,22 @@ interface Outcome {
 export const userAri = (accountId: string) => `ari:cloud:identity::user/${accountId}`;
 export const workItemAri = (cloudId: string, issueId: string) => `ari:cloud:jira:${cloudId}:issue/${issueId}`;
 
+/**
+ * Teamwork Graph sometimes refuses a read with this message and accepts the
+ * same read a moment later (seen on Forge demo sites), so it is retried.
+ */
+const ORG_DENIED = /not permitted to query this organi[sz]ation/i;
+const ORG_DENIED_RETRIES = 2;
+
 async function run(a: Attempt): Promise<Outcome> {
+  for (let attempt = 0; ; attempt++) {
+    const out = await runOnce(a);
+    if (!out.error || !ORG_DENIED.test(out.error) || attempt >= ORG_DENIED_RETRIES) return out;
+    await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt + Math.random() * 150));
+  }
+}
+
+async function runOnce(a: Attempt): Promise<Outcome> {
   try {
     const res = await api.asUser().requestTeamworkGraph(a.query, a.variables, a.op);
     const json: Json = await res.json().catch(() => ({}));
@@ -116,10 +131,27 @@ export interface GraphContext {
   notes: string[];
 }
 
+/**
+ * Teams of the person asking that `personId` is a member of. Teamwork Graph
+ * does not always link a person to their teams (seen with a site's sample
+ * users), while the team's member list does include them.
+ */
+async function teamsThroughRequester(personId: string, requesterId: string): Promise<{ teams: { id: string; name: string }[]; members: Outcome[] }> {
+  const mine = await firstThatWorks(teamsOf(userAri(requesterId)));
+  const candidates = parseTeams(mine.data?.atlassianUserInTeams).slice(0, 5);
+  const lists = await Promise.all(candidates.map((t) => firstThatWorks(membersOf(t.id))));
+  const shared = candidates
+    .map((team, i) => ({ team, members: lists[i] as Outcome }))
+    .filter((x) => parseTeamMembers(x.members.data?.atlassianTeamMembers).some((m) => m.accountId === personId))
+    .slice(0, 3);
+  return { teams: shared.map((x) => x.team), members: shared.map((x) => x.members) };
+}
+
 export async function readGraph(
   personId: string,
   items: { key: string; id: string }[],
   cloudId: string | undefined,
+  requesterId?: string,
 ): Promise<GraphContext> {
   const empty: GraphContext = { pullRequests: [], goals: [], teammates: [], itemPullRequests: {}, state: 'unavailable', notes: [] };
   if (!isAccountId(personId)) return { ...empty, notes: ['Teamwork Graph skipped: invalid account ID.'] };
@@ -144,8 +176,13 @@ export async function readGraph(
     if (list.length) out.itemPullRequests[it.key] = list;
   });
 
-  const teamList = parseTeams(teams.data?.atlassianUserInTeams).slice(0, 3);
-  const members = await Promise.all(teamList.map((t) => firstThatWorks(membersOf(t.id))));
+  let teamList = parseTeams(teams.data?.atlassianUserInTeams).slice(0, 3);
+  let members = await Promise.all(teamList.map((t) => firstThatWorks(membersOf(t.id))));
+  if (teamList.length === 0 && requesterId && requesterId !== personId && isAccountId(requesterId)) {
+    const shared = await teamsThroughRequester(personId, requesterId);
+    teamList = shared.teams;
+    members = shared.members;
+  }
   const mates = new Map<string, Teammate>();
   teamList.forEach((team, i) => {
     for (const m of parseTeamMembers(members[i]?.data?.atlassianTeamMembers)) {

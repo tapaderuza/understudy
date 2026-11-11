@@ -14,17 +14,17 @@ Going away? Understudy hands your Jira work to the right people with the context
 
 ## Category
 
-**Apps for Business Teams.** Handovers before leave are a people problem every team has (finance, ops, support, engineering), and the demo shows finance and operations work as well as code.
+**Apps for Business Teams.** Handovers before leave are a people problem every team has (finance, ops, support, engineering). Examples of work it handles: a month-end close, vendor contracts, tax exports, onboarding. The demo data mixes that kind of work ("Quarter-end tax export for Finance", "Update the refund policy page", "Archive closed chargeback disputes") with code.
 
-**Who it's for.** Anyone in a business team whose work lives in Jira and who goes on leave or covers for someone: a finance lead handing over the quarter-end close, an HR operations specialist before parental leave, a support team lead before a conference. And their managers, who can build the handover for a teammate and see who covers what.
+**Who it's for.** Anyone in a business team whose work lives in Jira and who goes on leave or covers for someone: a finance lead handing over the quarter-end close, an HR operations specialist before parental leave, a support team lead before a conference. And their managers, who can build the handover for a teammate, see who covers what, and find the work only one person knows before anyone goes away.
 
 ## Bonus prizes to tick
 
 The rules allow one Grand Prize plus one Bonus Prize per submission, and the Devpost form takes **one** bonus prize. The draft picks **Best Agents (Rovo)**, the strongest and fully live part; the other two below are still worth describing in the story:
 
-- **Best Agents (Rovo).** Forge `rovo:agent` with five `action` modules and two reusable `rovo:skill` modules (`handover-planner`, `welcome-back`) that other agents can load.
-- **Best app with Atlassian MCP.** `rovo:mcp` exposes the five actions as tools; the two `SKILL.md` files in the repo are open-source skill files users can add to third-party agents.
-- **Best apps with Teamwork Graph integration.** Consumes the Teamwork Graph API with five curated queries (teams, team members, pull requests, pull requests per work item, goals and projects).
+- **Best Agents (Rovo).** Forge `rovo:agent` with eight `action` modules and three reusable `rovo:skill` modules (`handover-planner`, `welcome-back`, `knowledge-risk`) that other agents can load.
+- **Best app with Atlassian MCP.** `rovo:mcp` exposes the eight actions as tools; the three `SKILL.md` files in the repo are open-source skill files users can add to third-party agents.
+- **Best apps with Teamwork Graph integration.** Queries the Teamwork Graph API through five curated queries: teams, team members, pull requests (the user's, and those linked to each work item), and goals and projects. Each source reports its own state. On the Forge demo site used for the video the graph returned no data for the fictional users, so the demo does not show graph evidence.
 
 ## Installation link
 
@@ -37,9 +37,13 @@ Distribution is set to "Sharing with anyone" (production environment, Jira, with
 
 ## Demo video (YouTube, public, under 5 minutes)
 
-https://youtu.be/s1VzERdO49g (public, 2:48)
+https://youtu.be/s1VzERdO49g (public, 2:48). It was recorded before the Team risk tab; a new cut will be linked here when ready.
 
 ## About the project
+
+- **What it is:** a Forge app for Jira and Confluence, with a Rovo agent and an MCP server, that plans a handover before someone goes away and catches them up when they are back.
+- **Who it is for:** anyone in a business team whose work lives in Jira and who goes on leave or covers for someone, and the managers who plan that cover.
+- **What is new:** a stand-in for each work item with evidence anyone can check, a warning for the work only one person knows, and a Team risk view that finds those single points of knowledge across a team before anyone leaves.
 
 ### Inspiration
 
@@ -53,48 +57,56 @@ Handovers weigh on people before and after leave. [46% of US workers with paid t
 
 ### What it does
 
-**Before you go.** Pick a person and dates. Understudy reads their open Jira work and ranks it by what must be covered: overdue, due while away, blocked, high priority, open pull request, someone waiting for a reply, in progress. For each item it suggests a stand-in **with the evidence**: "Commented 2 times on this item (+6), worked on 2 other items in Refunds v2 (+6), knows the Payments component (+1), already carries 9 open items (−2)". It assigns items in order of urgency and counts each assignment against that person's load, so the plan spreads work instead of burying the expert.
+**Before you go.** Pick a person and dates. Understudy reads their open Jira work and ranks it by what must be covered: overdue, due while away, blocked, high priority, open pull request, someone waiting for a reply, in progress. For example, with Ada Isadora away from 12 Nov 2026 to 14 Nov 2026 on the demo site, the headline reads: "Ada Isadora has 7 open items: 4 must be covered from 12 Nov 2026, 2 fall due by 14 Nov 2026, 1 already overdue, 1 only Ada Isadora has context on." For each item it suggests a stand-in **with the evidence**. An illustrative example of those evidence lines (not taken from the video): "Commented 2 times on this item (+6), worked on 2 other items in Refunds v2 (+6), knows the Payments component (+1), already carries 9 open items (−2)". It assigns items in order of urgency and counts each assignment against that person's load, so the plan spreads work instead of burying the expert.
 
-It also flags **work only you have context on**: items where nobody else has commented or worked nearby. Those need a 15-minute walkthrough before you leave, not a reassignment, and that is the knowledge most handovers lose.
+It also flags **work only you have context on**: items where nobody else has 3 or more points of evidence, because nobody else has commented or worked nearby. Those need a 15-minute walkthrough before you leave, not a reassignment, and that is the knowledge most handovers lose.
 
-Then one click briefs every stand-in (or one at a time): a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Another click publishes the whole handover as a Confluence page.
+Then one click briefs every stand-in (or one at a time): a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Briefing the same stand-in again updates your earlier briefing comment instead of adding a duplicate. Another click publishes the whole handover as a Confluence page.
 
 **Welcome back.** When you return, Understudy shows what other people did on your work since your first day away (status changes, reassignments, comments), with what needs you first: mentions, items handed to you, replies waiting. It recognizes its own briefings, so it can tell you which stand-in covered what.
 
+**Team risk.** Before anyone goes away, a manager or team lead picks up to 5 projects. Understudy checks every open assigned work item (up to the 100 most urgent) with the same evidence as a handover and finds the single points of knowledge: items where nobody else has 3 or more points of evidence. On the demo site, for PAY, OPS and FIN: "Only one person has context on 3 of the 14 open items in PAY, OPS, FIN, 2 of them due or urgent in the next two weeks. Ryan Lee holds the most: 2 of 2 items." Cover readiness, the share of open work someone else could pick up today, is 79%.
+
+The view shows tiles (open items checked, only one person knows, of those urgent soon, people with open work), a stacked bar chart "Who holds knowledge alone", a table "Work only one person knows" with the closest colleague and their evidence, and a People table with each person's cover readiness and best backup ("Could cover 3 of 5 today"). **Request walkthrough** posts a comment on the work item that @-mentions the owner, asks for a 15-minute walkthrough with the chosen colleague and adds the colleague as a watcher; the row then shows "Walkthrough asked for *name*". Nothing is reassigned, and the comment, signed "Requested with Understudy.", never counts as evidence.
+
+The handover warning counts only work that must be covered while someone is away, and the team view counts every open item, including work that can wait, so its numbers can be higher.
+
 **Everywhere you work:**
-- a Jira page with two tabs, *Before you go* and *Welcome back*;
+- a Jira page with three tabs, *Before you go*, *Welcome back* and *Team risk*;
 - an Understudy panel on every work item: "If Ada is away, who could cover this?";
-- a Rovo agent ("Prepare my handover for next week", "I'm back, what needs me first?");
-- an MCP server and two open skills, so a team's own Rovo Studio agents, or Claude and other MCP clients, can plan handovers too.
+- a Rovo agent ("Prepare my handover for next week", "I'm back, what needs me first?", "Where is our team's knowledge held by one person?");
+- an MCP server with eight tools and three open skills, so a team's own Rovo Studio agents, or Claude and other MCP clients, can plan handovers too.
 
 **How it differs:**
 - Out-of-office apps on the Marketplace make you name a coverer in advance and then reassign by rule; Understudy suggests a stand-in for each work item from evidence anyone can check in Jira, and shows why.
 - Rules move tickets; Understudy changes no assignee. It finds the work only you understand, so it gets a walkthrough instead of a silent reassignment, and spreads the load so your one expert is not buried.
 - Chat assistants summarize what you missed after you return; Understudy plans the cover before you leave, briefs each stand-in on the work item itself, publishes the handover page, and then closes the loop when you are back.
+- Out-of-office apps act once someone is away; none we found on the Marketplace shows a team's single points of knowledge before anyone leaves. Understudy's Team risk tab does, and turns each one into a walkthrough request.
 
 ### How we built it
 
-- **Forge**, runtime `nodejs24.x`, UI Kit for the Jira global page and the issue panel.
-- **Rovo:** `rovo:agent` with a prompt resource, five `action` modules, and two `rovo:skill` modules whose `SKILL.md` playbooks follow the Agent Skills format.
-- **MCP:** `rovo:mcp` exposes the same five actions as tools for Rovo Studio and for external MCP clients.
-- **Teamwork Graph API:** curated queries `atlassianUserInTeams` and `atlassianTeamMembers` (who is on the person's teams), `atlassianUserPullRequests` and `jiraWorkItemLinkedExternalPullRequests` (code in flight, batched with GraphQL aliases) and `atlassianUserGoalsAndProjects` (what the work rolls up to). Each query has a plainer fallback, and missing scopes degrade to "not available" rather than failing the handover.
-- **Jira and Confluence REST:** enhanced JQL search (with changelogs for Welcome back), ADF comments with mentions, watchers, CQL page search, and v2 pages to publish.
+- **Forge**, runtime `nodejs24.x`, UI Kit for the Jira global page (three tabs, with a UI Kit bar chart on Team risk) and the issue panel.
+- **Rovo:** `rovo:agent` with a prompt resource, eight `action` modules, and three `rovo:skill` modules (`handover-planner`, `welcome-back`, `knowledge-risk`) whose `SKILL.md` playbooks follow the Agent Skills format. The actions are `get-handover-brief`, `suggest-stand-ins`, `publish-handover-page`, `brief-stand-in`, `brief-all-stand-ins` (briefs every stand-in in the plan with one confirmation), `get-welcome-back-brief`, `get-team-knowledge-risk` (input `projects`, comma-separated keys; empty means the projects of the current user's open work) and `request-walkthrough` (inputs `issueKey`, `learner`, `note`). `publish-handover-page` and `brief-all-stand-ins` accept `standIns` ("PAY-3=Max Taylor; PAY-5=Cassi Owens"), so a plan edited in chat is what gets published and briefed.
+- **MCP:** `rovo:mcp` exposes the same eight actions as tools for Rovo Studio and for external MCP clients.
+- **Teamwork Graph API:** curated queries `atlassianUserInTeams` and `atlassianTeamMembers` (who is on the person's teams), `atlassianUserPullRequests` and `jiraWorkItemLinkedExternalPullRequests` (the user's pull requests and those linked to each work item, batched with GraphQL aliases) and `atlassianUserGoalsAndProjects` (what the work rolls up to). Each query has a plainer fallback, and each source reports its own state (connected, no data, not available), so missing scopes or an empty graph never fail the handover. On the Forge demo site used for the video, the graph returned no data for the fictional users and intermittently refused reads with "User is not permitted to query this organization" (a known demo-site issue, reported on the Atlassian developer community). The app now retries that error up to 3 times with backoff and then shows "Teamwork Graph no data" honestly; the demo does not show graph evidence.
+- **Jira and Confluence REST:** enhanced JQL search (with changelogs for Welcome back), ADF comments with mentions (a repeat briefing updates the earlier comment), watchers, CQL page search, and v2 pages to publish.
 - **Design for trust:** every call runs as the user (`asUser`), the graph is read-only, nothing is stored, nothing leaves Atlassian, and Understudy only writes (a comment, a watcher, a page) after a person confirms. Agent inputs come from an LLM, so identity always comes from the invocation context, and every key and account ID is validated before it reaches JQL.
-- **Quality:** the scoring, planning, rendering and parsing logic is pure TypeScript with 67 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
+- **Quality:** the scoring, planning, team-risk, rendering and parsing logic is pure TypeScript with 80 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
 
 ### Challenges we ran into
 
 - **Explaining, not just ranking.** A single score nobody could question was not trustworthy. We built the scoring so every point is a sentence a teammate can verify in Jira, and the UI and agent always show those reasons.
 - **The expert problem.** Pure "who knows most" sends everything to one person. Processing items by urgency and charging each assignment to the stand-in's load produces plans that spread the work.
-- **Empty graphs.** A missing Teamwork Graph scope returns success with no rows. Each source reports its own state (connected, no data, not available) so users and the agent can be honest about gaps.
+- **Empty graphs.** A missing Teamwork Graph scope returns success with no rows, and on the demo site some reads were intermittently refused with "User is not permitted to query this organization". Each source reports its own state (connected, no data, not available), and that refusal is retried, so users and the agent can be honest about gaps.
 - **Real data is messier than test data.** Testing on Atlassian's demo site found what unit tests could not. One person there has 2,447 open items, so Understudy now plans the 100 most urgent and says so. A single load search let that person use up the result limit and made everyone else look idle, so load is now counted per person. Automation for Jira, service desk customers and deactivated accounts were showing up as possible stand-ins, and Understudy's own briefing comments counted as the sender knowing the work; all of that is filtered now. And when everyone who knows an item is already overloaded, Understudy no longer suggests the least-bad option: it asks a person to decide.
 
 ### Accomplishments that we're proud of
 
 - The "only you know this" warning: the part of a handover that usually gets lost, found automatically.
+- A team view that finds single points of knowledge before anyone goes away, from the same evidence as a handover, and turns each one into a walkthrough request instead of a reassignment.
 - One engine behind four surfaces (page, issue panel, Rovo agent, MCP), so they always agree.
 - A complete loop: hand over, brief, publish, and hand back.
-- Every surface was exercised live on an Atlassian demo site: the Jira page, the work item panel, the Rovo agent, and the MCP tools from an external client (MCP Inspector) through Atlassian's MCP server. The Teamwork Graph queries are implemented and degrade gracefully: on the demo site the graph had no data for the fictional users and refused queries for our university-managed account, and the app says so in its sources line instead of hiding it.
+- Every surface was exercised live on an Atlassian demo site: the Jira page, the work item panel, the Rovo agent, and the MCP tools from an external client (MCP Inspector) through Atlassian's MCP server. The Teamwork Graph queries are implemented and degrade gracefully: on the demo site the graph had no data for the fictional users and intermittently refused reads, and the app says so in its sources line instead of hiding it.
 
 ### What we learned
 
@@ -104,11 +116,11 @@ Context only builds confidence when people can see where it came from. Evidence 
 
 - Spot upcoming time off from calendar events in the Teamwork Graph and suggest starting a handover a few days ahead.
 - Automation: run the handover agent from a Jira Automation rule when someone sets their status to away.
-- A team view for managers: who is a single point of knowledge across the team, before anyone goes away.
+- A scheduled weekly knowledge-risk digest, so a team lead sees new single points of knowledge without opening the page.
 
 ## How the project meets the main technology requirement
 
-Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates with Jira (global page, issue panel, JQL, comments, watchers), Confluence (page search and publishing), Rovo (agent, actions, skills, MCP) and the Teamwork Graph API (five curated queries, read-only `read:graph:*` scopes).
+Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates with Jira (global page, issue panel, JQL, comments, watchers), Confluence (page search and publishing), Rovo (agent, eight actions, three skills, MCP) and the Teamwork Graph API (five curated queries, read-only `read:graph:*` scopes).
 
 ## Testing instructions for judges
 
@@ -117,8 +129,9 @@ Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates
 3. Jira › Apps › Understudy › **Before you go**: keep yourself or pick a teammate, choose dates, **Build handover**. Change a stand-in, press **Brief stand-in**, pick a space and **Publish handover page**.
 4. Open any work item and expand the **Understudy** panel.
 5. Jira › Apps › Understudy › **Welcome back**: choose a first day away and press **What changed?**
-6. Rovo chat › **Understudy** agent: try "Prepare my handover for next week".
-7. Optional MCP: enable the tools for external clients in Connected apps, then connect an MCP client to `https://mcp.atlassian.com/forge/f822ce82-2fbb-4e00-878f-0798dda01b8c`.
+6. Jira › Apps › Understudy › **Team risk**: choose up to 5 projects and press **Check knowledge risk**. **Request walkthrough** on a row posts a comment on that work item.
+7. Rovo chat › **Understudy** agent: try "Prepare my handover for next week" or "Where is our team's knowledge held by one person?".
+8. Optional MCP: enable the tools for external clients in Connected apps, then connect an MCP client to `https://mcp.atlassian.com/forge/f822ce82-2fbb-4e00-878f-0798dda01b8c`.
 
 Understudy works on any Jira site where people share projects, epics and components. For an empty development site, `scripts/seed-demo.mjs` creates a small fictional team's work to try it on.
 
@@ -128,26 +141,6 @@ forge, ui-kit, rovo, rovo-agent, rovo-skill, rovo-mcp, teamwork-graph, graphql, 
 
 ---
 
-# Demo video script (the original storyboard; the published video is shorter, 2:37, and follows the same flow)
+# Demo video
 
-Recorded on the Forge demo site (one-atlas-kxyj.atlassian.net), using its fictional team: **Ada Isadora** goes on leave from tomorrow for five days; **Max Taylor**, **Cassi Owens**, **Ryan Lee** and the narrator are the team. The data lives in the projects PAY (Payments, epic PAY-1 "Refunds v2"), OPS (Platform Operations) and FIN (Finance Reporting). The numbers below were measured live on 11 Nov 2026. Due dates are relative, so check the numbers on screen on the recording day. Speak slowly; show, don't tell.
-
-| Time | Screen | Voice |
-| --- | --- | --- |
-| 0:00 | Ada's work in Jira (filter: assignee = Ada) | "Ada goes on leave tomorrow. Seven open items, one rushed handover doc, and the one thing only Ada understands is not in it." |
-| 0:12 | Title card: Understudy | "Understudy hands over your work with its context, and catches you up when you're back." |
-| 0:20 | Apps › Understudy › Before you go; pick Ada and the dates; Build handover | "Pick who is going away and when. Understudy reads Ada's Jira work, the Teamwork Graph and recent Confluence pages." |
-| 0:35 | Headline and stat tiles | "Seven open items. Four must be covered. Two fall due during the leave, one is already overdue, and one only Ada has context on." |
-| 0:50 | Warning panel: FIN-1, the quarter-end tax export | "This is what handovers lose: nobody else has ever touched the quarter-end tax export. Understudy says so, and asks for a walkthrough before Ada leaves." |
-| 1:05 | Cover plan row PAY-2 "Fix refund rounding for EUR", reasons | "For each item, a stand-in with the evidence. Max reported this item and has two more in the same epic, knows the Payments component and the refunds work. And Understudy noticed a question on it is waiting for Ada's reply." |
-| 1:25 | Who covers what: Max, Cassi, Ryan and the narrator | "Every assignment adds to that person's load, so the plan spreads the work across four people instead of burying one expert. Someone who already carries too much is never suggested: the plan asks a person to decide." |
-| 1:40 | Change a stand-in in the dropdown | "Suggestions, not decisions: you can pick someone else." |
-| 1:50 | Brief stand-in on PAY-2, then open PAY-2 and show the comment | "One click briefs Max right on the work item: what to cover, why it matters, and why Max was picked. Max is added as a watcher." |
-| 2:05 | Publish handover page; open the Confluence page | "And one click publishes the whole handover in Confluence, with mentions, status and the reasons." |
-| 2:20 | Issue panel on PAY-2 | "On any work item, the Understudy panel answers: if Ada is away, who could cover this?" |
-| 2:35 | Rovo chat with the Understudy agent | "It's also a Rovo agent. 'Ada is on leave from tomorrow, prepare the handover' gives the same plan in chat, from the same actions and skills." |
-| 2:55 | MCP client calling get-handover-brief (optional) | "Through Atlassian's MCP server, Claude or any MCP client can plan handovers too." |
-| 3:05 | Welcome back tab: Ada, What changed? | "When Ada comes back: what changed, what needs Ada first, and which stand-in covered what." |
-| 3:20 | Sources line; close on title card | "Everything runs as the user, reads the graph, stores nothing. Understudy: hand over your work without losing its context." |
-
-Note for the voice-over: Ada, Max, Cassi and Ryan are fictional people that come with the Forge demo site. The script uses names instead of pronouns on purpose.
+The demo video is https://youtu.be/s1VzERdO49g (2:48). It was recorded on the Forge demo site with the fictional people that come with it (Ada Isadora, Max Taylor, Cassi Owens, Ryan Lee) and the projects PAY, OPS and FIN. It does not show the Team risk tab yet. A new cut will be linked here when it is ready.
