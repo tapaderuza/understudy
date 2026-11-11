@@ -6,19 +6,34 @@
 // call site on purpose: that is the form `forge lint` can read to check the
 // manifest grants the scope every endpoint needs.
 import api, { route, type APIResponse } from '@forge/api';
+import { apiErrorMessage, type ApiAction, type Product } from '../core/errors';
 import type { Page, Person } from '../core/types';
 import { isAccountId, isIssueKey, parseConfluenceSearch, parsePersonResponse } from './parse';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
 
+/**
+ * A Jira or Confluence error status. Its message is the plain one a person
+ * can read (core/errors); Atlassian's own answer is kept in `detail` and only
+ * ever written to the logs.
+ */
 export class ApiError extends Error {
+  /** Atlassian's raw answer, for logs and checks only. Never shown to people. */
+  readonly detail: string;
+  /** How long Atlassian asked us to wait (Retry-After), when it said. */
+  readonly retryAfterMs?: number;
+
   constructor(
-    readonly product: 'jira' | 'confluence',
+    readonly product: Product,
     readonly status: number,
     detail: string,
+    opts: { action?: ApiAction; retryAfterMs?: number } = {},
   ) {
-    super(`${product} answered ${status}: ${detail.slice(0, 300)}`);
+    super(apiErrorMessage(product, status, opts.action));
+    this.name = 'ApiError';
+    this.detail = detail.slice(0, 300);
+    this.retryAfterMs = opts.retryAfterMs;
   }
 }
 
@@ -29,8 +44,19 @@ const post = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
-async function json(product: 'jira' | 'confluence', res: APIResponse): Promise<Json> {
-  if (!res.ok) throw new ApiError(product, res.status, await res.text());
+function retryAfterMs(res: APIResponse): number | undefined {
+  const raw = res.headers?.get?.('Retry-After');
+  const seconds = raw ? Number(raw) : NaN;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
+async function json(product: Product, res: APIResponse, action?: ApiAction): Promise<Json> {
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    // The raw answer goes to `forge logs` only; people see ApiError's plain message.
+    console.warn(`[understudy] ${product} answered ${res.status}`, detail.slice(0, 300));
+    throw new ApiError(product, res.status, detail, { action, retryAfterMs: retryAfterMs(res) });
+  }
   return res.status === 204 ? null : res.json();
 }
 
@@ -79,6 +105,12 @@ export async function getMyself(): Promise<Person> {
   const p = parsePersonResponse(await json('jira', await api.asUser().requestJira(route`/rest/api/3/myself`, GET)));
   if (!p) throw new Error('Could not read the current user.');
   return p;
+}
+
+/** The current user's time zone from their Jira profile, such as "Europe/Madrid", when Jira shares it. */
+export async function getMyTimeZone(): Promise<string | undefined> {
+  const me = await json('jira', await api.asUser().requestJira(route`/rest/api/3/myself`, GET));
+  return typeof me?.timeZone === 'string' && me.timeZone ? me.timeZone : undefined;
 }
 
 export async function getPerson(accountId: string): Promise<Person> {
@@ -175,12 +207,14 @@ export async function createPage(spaceId: string, title: string, storage: string
           route`/wiki/api/v2/pages`,
           post({ spaceId, status: 'current', title: t, body: { representation: 'storage', value: storage } }),
         ),
+      'create-page',
     );
   let res: Json;
   try {
     res = await attempt(title);
   } catch (e) {
-    if (!(e instanceof ApiError) || e.status !== 400 || !/title/i.test(e.message)) throw e;
+    const titleTaken = e instanceof ApiError && (e.status === 400 || e.status === 409) && /title/i.test(e.detail);
+    if (!titleTaken) throw e;
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
     res = await attempt(`${title} (updated ${stamp} UTC)`);
   }

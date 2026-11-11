@@ -41,6 +41,8 @@ export interface WelcomeBack {
   headline: string;
   stats: { changed: number; needsYou: number; mentions: number; finished: number; reassigned: number; covered: number };
   items: ReturnLine[];
+  /** What was left out or limited, in plain words (watched items skipped, result capped). */
+  notes: string[];
 }
 
 export const RETURN_LABELS: Record<ReturnReason, string> = {
@@ -56,7 +58,7 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-export function buildWelcomeBack(raw: ReturnItem[], person: Person, since: string, today: string): WelcomeBack {
+export function buildWelcomeBack(raw: ReturnItem[], person: Person, since: string, today: string, notes: string[] = []): WelcomeBack {
   const items: ReturnLine[] = raw
     .filter((i) => i.events.length > 0 || i.coveredBy)
     .map((i) => {
@@ -95,7 +97,7 @@ export function buildWelcomeBack(raw: ReturnItem[], person: Person, since: strin
     headline = `Since ${formatDay(since)}, ${plural(items.length, 'item')} changed${parts.length ? `: ${parts.join(', ')}` : ''}.`;
   }
 
-  return { person, since, today, headline, stats, items };
+  return { person, since, today, headline, stats, items, notes };
 }
 
 /** Compact JSON for the agent and MCP clients. */
@@ -120,5 +122,6 @@ export function toAgentReturnView(w: WelcomeBack) {
       .filter((i) => !i.needsYou)
       .slice(0, 20)
       .map((i) => ({ key: i.key, summary: i.summary, status: i.status, what: i.reasons.map((r) => RETURN_LABELS[r]), coveredBy: i.coveredBy ?? null })),
+    notes: w.notes,
   };
 }

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, {
+  Badge,
   Box,
   Button,
   DatePicker,
   DynamicTable,
   EmptyState,
   Heading,
+  Icon,
   Inline,
   Label,
   Link,
@@ -13,7 +15,9 @@ import ForgeReconciler, {
   ListItem,
   LoadingButton,
   Lozenge,
+  ProgressBar,
   SectionMessage,
+  SectionMessageAction,
   Select,
   Spinner,
   Stack,
@@ -24,17 +28,23 @@ import ForgeReconciler, {
   Tabs,
   Text,
   TextArea,
+  Toggle,
+  Tooltip,
   User,
+  UserGroup,
   UserPicker,
   xcss,
 } from '@forge/react';
 import { invoke, rovo } from '@forge/bridge';
 import type { UiBrief, UiWelcomeBack } from '../resolvers';
 import { formatDay } from '../core/dates';
+import { Evidence, contextPoints } from './evidence';
 
 type Item = UiBrief['items'][number];
 type Option = { label: string; value: string };
 type Failure = { error: string };
+type Glyph = Parameters<typeof Icon>[0]['glyph'];
+type Sent = { ok: boolean; text: string };
 
 const isFailure = (x: unknown): x is Failure => typeof x === 'object' && x !== null && 'error' in x;
 
@@ -57,6 +67,14 @@ const plusDays = (n: number) => {
   d.setUTCDate(d.getUTCDate() + n);
   return day(d);
 };
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+const card = xcss({
+  backgroundColor: 'elevation.surface.raised',
+  boxShadow: 'elevation.shadow.raised',
+  borderRadius: 'radius.large',
+  padding: 'space.300',
+});
 
 const tile = xcss({
   backgroundColor: 'color.background.neutral.subtle',
@@ -65,10 +83,21 @@ const tile = xcss({
   borderWidth: 'border.width',
   borderRadius: 'radius.medium',
   padding: 'space.150',
-  minWidth: '120px',
+  minWidth: '140px',
+});
+
+const tileWarning = xcss({
+  backgroundColor: 'color.background.warning',
+  borderColor: 'color.border.warning',
+  borderStyle: 'solid',
+  borderWidth: 'border.width.selected',
+  borderRadius: 'radius.medium',
+  padding: 'space.150',
+  minWidth: '140px',
 });
 
 const field = xcss({ minWidth: '220px' });
+const picker = xcss({ minWidth: '170px' });
 
 const TIER: Record<Item['tier'], { text: string; appearance: 'removed' | 'moved' | 'default' }> = {
   must: { text: 'Must cover', appearance: 'removed' },
@@ -82,14 +111,48 @@ const CONFIDENCE: Record<Item['confidence'], { text: string; appearance: 'succes
   low: { text: 'Needs a walkthrough', appearance: 'discovery' },
 };
 
-function Stat({ value, label }: { value: number; label: string }) {
+/** A compact number tile; the icon is decorative, the label carries the meaning. */
+function Stat({ value, label, glyph, warning = false }: { value: number; label: string; glyph: Glyph; warning?: boolean }) {
   return (
-    <Box xcss={tile}>
+    <Box xcss={warning ? tileWarning : tile}>
       <Stack space="space.050">
-        <Heading size="large">{String(value)}</Heading>
+        <Inline space="space.075" alignBlock="center">
+          <Icon glyph={glyph} label="" color={warning ? 'color.icon.warning' : 'color.icon.subtle'} />
+          <Heading size="large" as="span">
+            {String(value)}
+          </Heading>
+        </Inline>
         <Text size="small">{label}</Text>
       </Stack>
     </Box>
+  );
+}
+
+const STEPS = ['Who and when', 'Check the cover plan', 'Brief and publish'];
+
+/** "1 Who and when › 2 Check the cover plan › 3 Brief and publish". */
+function Steps({ current, finished }: { current: number; finished: boolean }) {
+  return (
+    <Inline space="space.100" alignBlock="center" shouldWrap>
+      {STEPS.map((label, i) => {
+        const n = i + 1;
+        const done = n < current || (finished && n === current);
+        const now = n === current && !done;
+        return (
+          <Inline key={label} space="space.075" alignBlock="center">
+            {done ? (
+              <Icon glyph="check-circle" label={`Step ${n} done:`} color="color.icon.success" />
+            ) : (
+              <Badge appearance={now ? 'primary' : 'default'}>{n}</Badge>
+            )}
+            <Text weight={now ? 'bold' : 'regular'} color={now || done ? 'color.text' : 'color.text.subtle'}>
+              {label}
+            </Text>
+            {n < STEPS.length && <Text color="color.text.subtlest">›</Text>}
+          </Inline>
+        );
+      })}
+    </Inline>
   );
 }
 
@@ -125,8 +188,11 @@ const Handover = () => {
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState<{ url: string; title: string } | null>(null);
   const [note, setNote] = useState('');
-  const [sent, setSent] = useState<Record<string, string>>({});
+  const [sent, setSent] = useState<Record<string, Sent>>({});
   const [sending, setSending] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [bulkResult, setBulkResult] = useState<{ ok: number; people: number; failed: number } | null>(null);
 
   useEffect(() => {
     call<{ accountId: string; displayName: string }>('whoAmI').then((r) => {
@@ -141,11 +207,13 @@ const Handover = () => {
   }, []);
 
   const build = async () => {
+    if (!personId) return;
     setLoading(true);
     setError(null);
     setPublished(null);
     setSent({});
     setOverrides({});
+    setBulkResult(null);
     const r = await call<UiBrief>('buildBrief', { accountId: personId, start, end });
     setLoading(false);
     if (isFailure(r)) setError(r.error);
@@ -154,13 +222,15 @@ const Handover = () => {
 
   const chosen = (it: Item) => overrides[it.key] ?? it.standIn?.accountId ?? '';
 
-  const brieF = async (it: Item) => {
+  /** Briefs one stand-in; true when the briefing was sent. */
+  const brieF = async (it: Item): Promise<boolean> => {
     const standInId = chosen(it);
-    if (!standInId) return;
+    if (!standInId) return false;
     setSending(it.key);
     const r = await call<{ message: string }>('notify', { issueKey: it.key, standInId, start, end, note });
     setSending(null);
-    setSent((prev) => ({ ...prev, [it.key]: isFailure(r) ? `Failed: ${r.error}` : r.message }));
+    setSent((prev) => ({ ...prev, [it.key]: isFailure(r) ? { ok: false, text: `Failed: ${r.error}` } : { ok: true, text: r.message } }));
+    return !isFailure(r);
   };
 
   const doPublish = async () => {
@@ -192,11 +262,77 @@ const Handover = () => {
       value: p.accountId,
     }));
   };
+  const nameOf = (it: Item, accountId: string) =>
+    [it.standIn, ...it.alternatives].find((p) => p?.accountId === accountId)?.displayName ?? 'Chosen stand-in';
+  /** An alternative's context points, when the resolver sends them. */
+  const altPoints = (it: Item, accountId: string): number | undefined => {
+    const alt = it.alternatives.find((a) => a.accountId === accountId);
+    const v = alt ? (alt as unknown as Record<string, unknown>).contextPoints : undefined;
+    return typeof v === 'number' ? v : undefined;
+  };
+
+  // A gap: an item to cover with no stand-in, or whose stand-in has too
+  // little context (under 3 points, the "low" confidence line).
+  const isGap = (it: Item) => {
+    const id = chosen(it);
+    if (!id) return true;
+    if (it.standIn?.accountId === id) return it.confidence === 'low';
+    const p = altPoints(it, id);
+    return p !== undefined && p < 3;
+  };
+  const gaps = active.filter(isGap).length;
+  const coveredCount = active.length - gaps;
+
+  // Who covers what, from the current picks rather than the first suggestion.
+  const coverNow = new Map<string, { name: string; count: number }>();
+  for (const it of active) {
+    const id = chosen(it);
+    if (!id) continue;
+    const prev = coverNow.get(id);
+    coverNow.set(id, { name: prev?.name ?? nameOf(it, id), count: (prev?.count ?? 0) + 1 });
+  }
+  const coverList = [...coverNow.entries()].sort((a, b) => b[1].count - a[1].count);
+
+  const pending = active.filter((it) => chosen(it) && !sent[it.key]?.ok);
+  const anyBriefed = Object.values(sent).some((s) => s.ok);
+  const step = !brief ? 1 : anyBriefed || published ? 3 : 2;
+
+  const briefAll = async () => {
+    const queue = pending;
+    if (!queue.length) return;
+    setBulkResult(null);
+    setBulk({ done: 0, total: queue.length });
+    let ok = 0;
+    const people = new Set<string>();
+    let done = 0;
+    for (const it of queue) {
+      if (await brieF(it)) {
+        ok++;
+        people.add(chosen(it));
+      }
+      done++;
+      setBulk({ done, total: queue.length });
+    }
+    setBulk(null);
+    setBulkResult({ ok, people: people.size, failed: queue.length - ok });
+  };
+
+  const bulkText = (b: { ok: number; people: number; failed: number }) => {
+    const main =
+      b.ok === 0
+        ? 'No stand-ins were briefed.'
+        : b.people === b.ok
+          ? `Briefed ${plural(b.ok, 'stand-in')}.`
+          : `Briefed ${plural(b.people, 'stand-in')} on ${plural(b.ok, 'item')}.`;
+    return b.failed ? `${main} ${b.failed} could not be sent; those rows say why.` : main;
+  };
 
   const rows = active.map((it) => {
     const opts = optionsFor(it);
-    const current = opts.find((o) => o.value === chosen(it));
-    const reasons = it.standIn && chosen(it) === it.standIn.accountId ? it.standIn.reasons : [];
+    const id = chosen(it);
+    const current = opts.find((o) => o.value === id);
+    const suggested = Boolean(it.standIn) && id === it.standIn?.accountId;
+    const done = sent[it.key];
     return {
       key: it.key,
       cells: [
@@ -231,16 +367,40 @@ const Handover = () => {
         {
           key: 'who',
           content: opts.length ? (
-            <Stack space="space.050">
-              <Select
-                options={opts}
-                value={current}
-                placeholder="Pick a stand-in"
-                onChange={(o: Option) => setOverrides((prev) => ({ ...prev, [it.key]: o.value }))}
-                spacing="compact"
-              />
-              {it.standIn ? (
-                <Lozenge appearance={CONFIDENCE[it.confidence].appearance}>{CONFIDENCE[it.confidence].text}</Lozenge>
+            <Stack space="space.100">
+              <Inline space="space.100" alignBlock="center">
+                {id ? <User accountId={id} hideDisplayName /> : null}
+                <Box xcss={picker}>
+                  <Select
+                    options={opts}
+                    value={current}
+                    placeholder="Pick a stand-in"
+                    onChange={(o: Option) => setOverrides((prev) => ({ ...prev, [it.key]: o.value }))}
+                    spacing="compact"
+                  />
+                </Box>
+              </Inline>
+              {suggested && it.standIn ? (
+                <Evidence
+                  name={it.standIn.displayName}
+                  reasons={it.standIn.reasons}
+                  points={contextPoints(it.standIn)}
+                  high={it.confidence === 'high'}
+                  showAll={showAll}
+                  aside={<Lozenge appearance={CONFIDENCE[it.confidence].appearance}>{CONFIDENCE[it.confidence].text}</Lozenge>}
+                />
+              ) : id && altPoints(it, id) !== undefined ? (
+                <Evidence
+                  name={nameOf(it, id)}
+                  reasons={[]}
+                  points={altPoints(it, id)}
+                  high={(altPoints(it, id) ?? 0) >= 6}
+                  aside={<Lozenge appearance="default">Your pick</Lozenge>}
+                />
+              ) : id ? (
+                <Text size="small" color="color.text.subtle">
+                  Your pick. The briefing and the page use it.
+                </Text>
               ) : (
                 <Lozenge appearance="moved">Everyone with context is busy</Lozenge>
               )}
@@ -250,33 +410,134 @@ const Handover = () => {
           ),
         },
         {
-          key: 'because',
-          content: (
-            <Stack space="space.025">
-              {reasons.map((r) => (
-                <Text key={r.text} size="small" color={r.points < 0 ? 'color.text.warning' : 'color.text'}>
-                  {r.points > 0 ? `+${r.points}` : String(r.points)} {r.text}
-                </Text>
-              ))}
-            </Stack>
-          ),
-        },
-        {
           key: 'act',
-          content: sent[it.key] ? (
-            <Text size="small">{sent[it.key]}</Text>
+          content: done?.ok ? (
+            <Tooltip content={done.text}>
+              <Lozenge appearance="success">Briefed</Lozenge>
+            </Tooltip>
           ) : (
-            <LoadingButton isLoading={sending === it.key} isDisabled={!chosen(it)} onClick={() => brieF(it)}>
-              Brief stand-in
-            </LoadingButton>
+            <Stack space="space.050">
+              <LoadingButton
+                spacing="compact"
+                isLoading={sending === it.key}
+                isDisabled={!id || bulk !== null || (sending !== null && sending !== it.key)}
+                onClick={() => brieF(it)}
+              >
+                Brief stand-in
+              </LoadingButton>
+              {done && (
+                <Text size="small" color="color.text.danger">
+                  {done.text}
+                </Text>
+              )}
+            </Stack>
           ),
         },
       ],
     };
   });
 
+  const tgOk = brief?.sources.teamworkGraph === 'ok';
+  const tabs = brief
+    ? [
+        {
+          key: 'later',
+          title: `Can wait (${later.length})`,
+          count: later.length,
+          panel: (
+            <Box padding="space.100">
+              <List type="unordered">
+                {later.slice(0, 30).map((it) => (
+                  <ListItem key={it.key}>
+                    <Link href={it.url} openNewTab>
+                      {it.key}
+                    </Link>{' '}
+                    {it.summary} ({it.status})
+                  </ListItem>
+                ))}
+              </List>
+              {later.length > 30 && (
+                <Text size="small" color="color.text.subtle">
+                  {`And ${later.length - 30} more that can wait.`}
+                </Text>
+              )}
+            </Box>
+          ),
+        },
+        {
+          key: 'code',
+          title: `Code in flight (${brief.pullRequests.length})`,
+          count: brief.pullRequests.length,
+          panel: (
+            <Box padding="space.100">
+              <List type="unordered">
+                {brief.pullRequests.map((p) => (
+                  <ListItem key={p.id}>
+                    <Lozenge appearance={p.status === 'OPEN' ? 'inprogress' : 'default'}>{p.status}</Lozenge>{' '}
+                    {p.url ? (
+                      <Link href={p.url} openNewTab>
+                        {p.title}
+                      </Link>
+                    ) : (
+                      p.title
+                    )}
+                    {p.workItemKey ? ` (${p.workItemKey})` : ''}
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          ),
+        },
+        {
+          key: 'goals',
+          title: `Goals and projects (${brief.goals.length})`,
+          count: brief.goals.length,
+          panel: (
+            <Box padding="space.100">
+              <List type="unordered">
+                {brief.goals.map((g) => (
+                  <ListItem key={g.id}>
+                    {g.kind === 'goal' ? 'Goal: ' : 'Project: '}
+                    {g.url ? (
+                      <Link href={g.url} openNewTab>
+                        {g.name}
+                      </Link>
+                    ) : (
+                      g.name
+                    )}
+                    {g.state ? ` (${g.state.replace(/_/g, ' ').toLowerCase()})` : ''}
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          ),
+        },
+        {
+          key: 'pages',
+          title: `Pages (${brief.pages.length})`,
+          count: brief.pages.length,
+          panel: (
+            <Box padding="space.100">
+              <List type="unordered">
+                {brief.pages.map((p) => (
+                  <ListItem key={p.id}>
+                    <Link href={p.url} openNewTab>
+                      {p.title}
+                    </Link>
+                    {p.space ? ` in ${p.space}` : ''}
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          ),
+        },
+      ].filter((t) => t.count > 0)
+    : [];
+
   return (
     <Stack space="space.300">
+      <Steps current={step} finished={Boolean(published)} />
+
       <Text>Going away? Hand over your work with its context: what must be covered, who already knows it, and why.</Text>
 
       <Inline space="space.200" alignBlock="end" shouldWrap>
@@ -320,172 +581,194 @@ const Handover = () => {
       {!brief && !loading && (
         <EmptyState
           header="Pick who is going away and when"
+          headingLevel={2}
           description="Understudy reads their open Jira work, pull requests, goals and pages, then suggests who should cover each item and explains why."
+          primaryAction={
+            <Button appearance="primary" isDisabled={!personId} onClick={build}>
+              Build handover
+            </Button>
+          }
         />
       )}
 
-      {brief && (
-        <Stack space="space.300">
-          <SectionMessage appearance={brief.stats.soloKnowledge > 0 ? 'warning' : 'information'} title={brief.headline}>
-            <Text>
-              Away {formatDay(brief.absence.start)} to {formatDay(brief.absence.end)}. Pick a different stand-in from any list; the page you
-              publish uses your choices.
+      {loading && (
+        <Box padding="space.400">
+          <Stack space="space.150" alignInline="center">
+            <Spinner size="large" label="Building the handover" />
+            <Text color="color.text.subtle">
+              Reading open Jira work items and their comments, related work, team load, pull requests, goals and Confluence pages
             </Text>
-          </SectionMessage>
+          </Stack>
+        </Box>
+      )}
 
-          <Inline space="space.150" shouldWrap>
-            <Stat value={brief.stats.open} label="Open items" />
-            <Stat value={brief.stats.must} label="Must be covered" />
-            <Stat value={brief.stats.dueWhileAway} label="Due while away" />
-            <Stat value={brief.stats.soloKnowledge} label={`Only ${brief.person.displayName} knows`} />
-            <Stat value={brief.stats.openPullRequests} label="Pull requests in flight" />
-            <Stat value={brief.stats.standIns} label="Stand-ins" />
-          </Inline>
+      {brief && !loading && (
+        <Stack space="space.300">
+          <Box xcss={card}>
+            <Stack space="space.200">
+              <Inline space="space.150" alignBlock="center" spread="space-between" shouldWrap>
+                <Heading size="medium" as="h2">
+                  Plan health
+                </Heading>
+                {gaps === 0 ? (
+                  <Lozenge appearance="success">Ready to hand over</Lozenge>
+                ) : (
+                  <Lozenge appearance="warning">{plural(gaps, 'gap')}</Lozenge>
+                )}
+              </Inline>
+              <Text>{brief.headline}</Text>
+              <Text size="small" color="color.text.subtle">
+                Away {formatDay(brief.absence.start)} to {formatDay(brief.absence.end)}. Pick a different stand-in from any list; the briefings
+                and the page you publish use your choices.
+              </Text>
+              {active.length > 0 && (
+                <Stack space="space.075">
+                  <Text size="small">
+                    <Strong>{`${coveredCount} of ${active.length}`}</Strong> items to cover have a stand-in with context
+                  </Text>
+                  <ProgressBar
+                    value={coveredCount / active.length}
+                    appearance={gaps === 0 ? 'success' : 'default'}
+                    ariaLabel={`${coveredCount} of ${active.length} items to cover have a stand-in with context`}
+                  />
+                </Stack>
+              )}
+              {coverList.length > 0 && (
+                <Inline space="space.150" alignBlock="center" shouldWrap>
+                  <UserGroup>
+                    {coverList.map(([accountId]) => (
+                      <User key={accountId} accountId={accountId} />
+                    ))}
+                  </UserGroup>
+                  <Text size="small" color="color.text.subtle">
+                    {coverList.map(([, c]) => `${c.name}: ${plural(c.count, 'item')}`).join(' · ')}
+                  </Text>
+                </Inline>
+              )}
+              <Inline space="space.150" shouldWrap>
+                <Stat value={brief.stats.open} label="Open items" glyph="work-items" />
+                <Stat value={brief.stats.must} label="Must be covered" glyph="flag" />
+                <Stat value={brief.stats.dueWhileAway} label="Due while away" glyph="calendar" />
+                <Stat
+                  value={brief.stats.soloKnowledge}
+                  label={`Only ${brief.person.displayName} knows`}
+                  glyph="person-warning"
+                  warning={brief.stats.soloKnowledge > 0}
+                />
+              </Inline>
+            </Stack>
+          </Box>
 
           {brief.soloKnowledge.length > 0 && (
             <SectionMessage appearance="warning" title={`Only ${brief.person.displayName} has context on these`}>
-              <Stack space="space.100">
+              <Stack space="space.075">
                 <Text>Nobody else has commented on them or worked nearby. Book a short walkthrough before leaving.</Text>
-                <List type="unordered">
-                  {brief.soloKnowledge.map((k) => {
-                    const it = brief.items.find((i) => i.key === k);
-                    return (
-                      <ListItem key={k}>
-                        <Link href={it?.url ?? '#'} openNewTab>
-                          {k}
-                        </Link>{' '}
-                        {it?.summary}
-                      </ListItem>
-                    );
-                  })}
-                </List>
+                {brief.soloKnowledge.map((k) => {
+                  const it = brief.items.find((i) => i.key === k);
+                  return (
+                    <Text key={k} maxLines={1}>
+                      <Link href={it?.url ?? '#'} openNewTab>
+                        {k}
+                      </Link>
+                      {it?.summary ? ` ${it.summary}` : ''}
+                    </Text>
+                  );
+                })}
               </Stack>
             </SectionMessage>
           )}
 
-          {brief.cover.length > 0 && (
-            <Stack space="space.100">
-              <Heading size="medium">Who covers what</Heading>
-              <Inline space="space.200" shouldWrap>
-                {brief.cover.map((c) => (
-                  <Inline key={c.accountId} space="space.100" alignBlock="center">
-                    <User accountId={c.accountId} />
-                    <Text>
-                      <Strong>{String(c.itemKeys.length)}</Strong> {c.itemKeys.length === 1 ? 'item' : 'items'}
-                    </Text>
-                  </Inline>
-                ))}
+          <Stack space="space.150">
+            <Inline space="space.150" alignBlock="center" spread="space-between" shouldWrap>
+              <Heading size="medium" as="h2">
+                Cover plan
+              </Heading>
+              <Inline space="space.075" alignBlock="center">
+                <Toggle id="show-reasons" label="Show every reason" isChecked={showAll} onChange={() => setShowAll((v) => !v)} />
+                <Label labelFor="show-reasons">Show every reason</Label>
               </Inline>
+            </Inline>
+            <Stack space="space.050">
+              <Label labelFor="briefing-note">Note added to every briefing (optional)</Label>
+              <TextArea
+                id="briefing-note"
+                name="note"
+                placeholder="For example, where the runbook is."
+                value={note}
+                onChange={(e) => setNote(String(e.target.value ?? ''))}
+              />
             </Stack>
-          )}
-
-          <Stack space="space.100">
-            <Heading size="medium">Cover plan</Heading>
+            <Inline space="space.150" alignBlock="center" shouldWrap>
+              <LoadingButton appearance="primary" isLoading={bulk !== null} isDisabled={pending.length === 0 || sending !== null} onClick={briefAll}>
+                {pending.length > 0 ? `Brief all stand-ins (${pending.length})` : 'Brief all stand-ins'}
+              </LoadingButton>
+              {bulk ? (
+                <Text size="small">{`Briefing ${Math.min(bulk.done + 1, bulk.total)} of ${bulk.total}`}</Text>
+              ) : bulkResult ? (
+                <Inline space="space.075" alignBlock="center">
+                  <Icon
+                    glyph={bulkResult.failed ? 'warning' : 'check-circle'}
+                    label=""
+                    color={bulkResult.failed ? 'color.icon.warning' : 'color.icon.success'}
+                  />
+                  <Text size="small">{bulkText(bulkResult)}</Text>
+                </Inline>
+              ) : pending.length === 0 && anyBriefed ? (
+                <Text size="small" color="color.text.subtle">
+                  Every stand-in is briefed.
+                </Text>
+              ) : null}
+            </Inline>
+            {bulk && (
+              <ProgressBar value={bulk.done / bulk.total} ariaLabel={`Briefed ${bulk.done} of ${bulk.total} stand-ins`} />
+            )}
             <DynamicTable
-              caption={active.length ? undefined : 'Nothing urgent to cover.'}
+              label="Cover plan"
               head={{
                 cells: [
-                  { key: 'item', content: 'Work item' },
-                  { key: 'why', content: 'Why it matters' },
-                  { key: 'who', content: 'Stand-in' },
-                  { key: 'because', content: 'Why this stand-in' },
-                  { key: 'act', content: '' },
+                  { key: 'item', content: 'Work item', width: 30 },
+                  { key: 'why', content: 'Why it matters', width: 16 },
+                  { key: 'who', content: 'Stand-in and evidence', width: 40 },
+                  { key: 'act', content: 'Briefing', width: 14 },
                 ],
               }}
               rows={rows}
               rowsPerPage={15}
-              emptyView={<Text>Nothing urgent to cover.</Text>}
-            />
-            <TextArea
-              name="note"
-              placeholder="Optional note added to every stand-in briefing, e.g. where the runbook is."
-              value={note}
-              onChange={(e) => setNote(String(e.target.value ?? ''))}
+              emptyView={
+                <EmptyState
+                  header="Nothing needs cover"
+                  headingLevel={3}
+                  width="narrow"
+                  description="No open item is urgent enough to hand over. Items that can wait are listed below."
+                />
+              }
             />
           </Stack>
 
-          <Tabs id="context">
-            <TabList>
-              <Tab>{`Can wait (${later.length})`}</Tab>
-              <Tab>{`Code in flight (${brief.pullRequests.length})`}</Tab>
-              <Tab>{`Goals and projects (${brief.goals.length})`}</Tab>
-              <Tab>{`Pages (${brief.pages.length})`}</Tab>
-            </TabList>
-            <TabPanel>
-              <Box padding="space.100">
-                <List type="unordered">
-                  {later.slice(0, 30).map((it) => (
-                    <ListItem key={it.key}>
-                      <Link href={it.url} openNewTab>
-                        {it.key}
-                      </Link>{' '}
-                      {it.summary} ({it.status})
-                    </ListItem>
-                  ))}
-                </List>
-                {later.length > 30 && (
-                  <Text size="small" color="color.text.subtle">
-                    {`And ${later.length - 30} more that can wait.`}
-                  </Text>
-                )}
-              </Box>
-            </TabPanel>
-            <TabPanel>
-              <Box padding="space.100">
-                <List type="unordered">
-                  {brief.pullRequests.map((p) => (
-                    <ListItem key={p.id}>
-                      <Lozenge appearance={p.status === 'OPEN' ? 'inprogress' : 'default'}>{p.status}</Lozenge>{' '}
-                      {p.url ? (
-                        <Link href={p.url} openNewTab>
-                          {p.title}
-                        </Link>
-                      ) : (
-                        p.title
-                      )}
-                      {p.workItemKey ? ` (${p.workItemKey})` : ''}
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            </TabPanel>
-            <TabPanel>
-              <Box padding="space.100">
-                <List type="unordered">
-                  {brief.goals.map((g) => (
-                    <ListItem key={g.id}>
-                      {g.kind === 'goal' ? 'Goal: ' : 'Project: '}
-                      {g.url ? (
-                        <Link href={g.url} openNewTab>
-                          {g.name}
-                        </Link>
-                      ) : (
-                        g.name
-                      )}
-                      {g.state ? ` (${g.state.replace(/_/g, ' ').toLowerCase()})` : ''}
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            </TabPanel>
-            <TabPanel>
-              <Box padding="space.100">
-                <List type="unordered">
-                  {brief.pages.map((p) => (
-                    <ListItem key={p.id}>
-                      <Link href={p.url} openNewTab>
-                        {p.title}
-                      </Link>
-                      {p.space ? ` in ${p.space}` : ''}
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            </TabPanel>
-          </Tabs>
+          {tabs.length > 0 && (
+            <Tabs id="context">
+              <TabList>
+                {tabs.map((t) => (
+                  <Tab key={t.key}>{t.title}</Tab>
+                ))}
+              </TabList>
+              {tabs.map((t) => (
+                <TabPanel key={t.key}>{t.panel}</TabPanel>
+              ))}
+            </Tabs>
+          )}
+          {!tgOk && (
+            <Text size="small" color="color.text.subtle">
+              {brief.sources.teamworkGraph === 'empty'
+                ? 'Teamwork Graph has no code in flight or goals for this person.'
+                : 'Code in flight and goals come from Teamwork Graph, which is not available on this site.'}
+            </Text>
+          )}
 
           <Stack space="space.100">
-            <Heading size="medium">Publish the handover</Heading>
+            <Heading size="medium" as="h2">
+              Publish the handover
+            </Heading>
             <Inline space="space.150" alignBlock="end" shouldWrap>
               <Box xcss={field}>
                 {spaces === null ? (
@@ -493,11 +776,7 @@ const Handover = () => {
                 ) : spaces.length === 0 ? (
                   <Text size="small">Connect Understudy to Confluence to publish handover pages.</Text>
                 ) : (
-                  <Select
-                    placeholder="Confluence space"
-                    options={spaces}
-                    onChange={(o: Option) => setSpaceId(o.value)}
-                  />
+                  <Select placeholder="Confluence space" options={spaces} onChange={(o: Option) => setSpaceId(o.value)} />
                 )}
               </Box>
               <LoadingButton appearance="primary" isLoading={publishing} isDisabled={!spaceId} onClick={doPublish}>
@@ -505,10 +784,16 @@ const Handover = () => {
               </LoadingButton>
             </Inline>
             {published && (
-              <SectionMessage appearance="success" title="Handover page published">
-                <Link href={published.url} openNewTab>
-                  {published.title}
-                </Link>
+              <SectionMessage
+                appearance="success"
+                title="Handover page published"
+                actions={[
+                  <SectionMessageAction key="open" href={published.url}>
+                    Open handover page
+                  </SectionMessageAction>,
+                ]}
+              >
+                <Text>{published.title}</Text>
               </SectionMessage>
             )}
           </Stack>
@@ -539,6 +824,7 @@ const WelcomeBack = () => {
   }, []);
 
   const run = async () => {
+    if (!personId) return;
     setLoading(true);
     setError(null);
     const r = await call<UiWelcomeBack>('welcomeBack', { accountId: personId, since });
@@ -643,34 +929,75 @@ const WelcomeBack = () => {
       {!data && !loading && (
         <EmptyState
           header="Pick who is back and their first day away"
+          headingLevel={2}
           description="Understudy reads what other people did on their work since then: status changes, reassignments, comments and mentions, and which stand-in covered what."
+          primaryAction={
+            <Button appearance="primary" isDisabled={!personId} onClick={run}>
+              What changed?
+            </Button>
+          }
         />
       )}
 
-      {data && (
-        <Stack space="space.200">
-          <SectionMessage appearance={data.stats.needsYou > 0 ? 'warning' : 'success'} title={data.headline}>
-            <Text>Items that need you are listed first.</Text>
-          </SectionMessage>
-          <Inline space="space.150" shouldWrap>
-            <Stat value={data.stats.changed} label="Items changed" />
-            <Stat value={data.stats.needsYou} label="Need you" />
-            <Stat value={data.stats.mentions} label="Mention you" />
-            <Stat value={data.stats.finished} label="Finished" />
-            <Stat value={data.stats.covered} label="Covered by a stand-in" />
-          </Inline>
+      {loading && (
+        <Box padding="space.400">
+          <Stack space="space.150" alignInline="center">
+            <Spinner size="large" label="Catching up" />
+            <Text color="color.text.subtle">Reading status changes, reassignments, comments and mentions since {formatDay(since)}</Text>
+          </Stack>
+        </Box>
+      )}
+
+      {data && !loading && (
+        <Stack space="space.300">
+          <Box xcss={card}>
+            <Stack space="space.200">
+              <Inline space="space.150" alignBlock="center" spread="space-between" shouldWrap>
+                <Heading size="medium" as="h2">
+                  Catch-up
+                </Heading>
+                {data.stats.needsYou > 0 ? (
+                  <Lozenge appearance="warning">{`${data.stats.needsYou} need you`}</Lozenge>
+                ) : (
+                  <Lozenge appearance="success">Nothing waiting on you</Lozenge>
+                )}
+              </Inline>
+              <Text>{data.headline}</Text>
+              {data.stats.changed > 0 && (
+                <Stack space="space.075">
+                  <Text size="small">
+                    <Strong>{`${data.stats.needsYou} of ${data.stats.changed}`}</Strong> changed items need you. They are listed first.
+                  </Text>
+                  <ProgressBar
+                    value={Math.min(1, data.stats.needsYou / data.stats.changed)}
+                    ariaLabel={`${data.stats.needsYou} of ${data.stats.changed} changed items need you`}
+                  />
+                </Stack>
+              )}
+              <Inline space="space.150" shouldWrap>
+                <Stat value={data.stats.changed} label="Items changed" glyph="changes" />
+                <Stat value={data.stats.needsYou} label="Need you" glyph="person-warning" warning={data.stats.needsYou > 0} />
+                <Stat value={data.stats.mentions} label="Mention you" glyph="comment" />
+                <Stat value={data.stats.covered} label="Covered by a stand-in" glyph="people-group" />
+              </Inline>
+              {data.stats.finished > 0 && (
+                <Text size="small" color="color.text.subtle">{`${plural(data.stats.finished, 'item')} finished while you were away.`}</Text>
+              )}
+            </Stack>
+          </Box>
           <DynamicTable
+            label="What changed while you were away"
             head={{
               cells: [
-                { key: 'item', content: 'Work item' },
-                { key: 'what', content: 'What happened' },
-                { key: 'latest', content: 'Latest' },
-                { key: 'covered', content: 'Covered by' },
+                { key: 'item', content: 'Work item', width: 32 },
+                { key: 'what', content: 'What happened', width: 22 },
+                { key: 'latest', content: 'Latest', width: 32 },
+                { key: 'covered', content: 'Covered by', width: 14 },
               ],
             }}
             rows={rows}
             rowsPerPage={15}
-            emptyView={<Text>Nothing changed while you were away.</Text>}
+            emptyView={<EmptyState header="Nothing changed while you were away" headingLevel={3} width="narrow" />}
           />
         </Stack>
       )}

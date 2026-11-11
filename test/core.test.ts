@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildBrief, toAgentView } from '../src/core/brief';
-import { addDays, daysBetween, formatDay, isIsoDay, normaliseAbsence } from '../src/core/dates';
+import { settleBy } from '../src/core/budget';
+import { addDays, dayInput, daysBetween, formatDay, isIsoDay, normaliseAbsence, returnSince, todayIn } from '../src/core/dates';
+import { REAUTHORISE, UNEXPECTED, UNREACHABLE, apiErrorMessage, userMessage } from '../src/core/errors';
 import { renderHandoverPage, standInComment } from '../src/core/render';
 import { assessRisk } from '../src/core/risk';
-import { confidenceOf, rankStandIns } from '../src/core/standins';
+import { confidenceOf, contextPointsOf, rankStandIns } from '../src/core/standins';
 import { ANA, BEN, CHEN, DEE, item, snapshot } from './fixtures';
 
 // FIN-12 is work nobody else has touched: the case Understudy exists for.
@@ -22,9 +24,36 @@ describe('dates', () => {
     expect(isIsoDay('1 Dec')).toBe(false);
   });
 
-  it('defaults a missing absence to one week from today and swaps reversed dates', () => {
+  it('defaults a missing absence to one week from today and rejects reversed dates', () => {
     expect(normaliseAbsence(undefined, undefined, '2026-11-25')).toEqual({ start: '2026-11-25', end: '2026-12-01' });
-    expect(normaliseAbsence('2026-12-10', '2026-12-01', '2026-11-25')).toEqual({ start: '2026-12-01', end: '2026-12-10' });
+    expect(normaliseAbsence('', '  ', '2026-11-25')).toEqual({ start: '2026-11-25', end: '2026-12-01' });
+    expect(() => normaliseAbsence('2026-12-10', '2026-12-01', '2026-11-25')).toThrow(
+      'The last day away (2026-12-01) is before the first day away (2026-12-10).',
+    );
+    expect(() => normaliseAbsence(undefined, '2026-11-20', '2026-11-25')).toThrow('is before today (2026-11-25)');
+  });
+
+  it('never silently replaces a date that is not YYYY-MM-DD', () => {
+    expect(() => normaliseAbsence('next monday', undefined, '2026-11-25')).toThrow("Use dates as YYYY-MM-DD (got 'next monday').");
+    expect(() => normaliseAbsence('2026-12-01', '2026-02-30', '2026-11-25')).toThrow("Use dates as YYYY-MM-DD (got '2026-02-30').");
+    expect(() => dayInput(20261201)).toThrow("(got '20261201')");
+    expect(dayInput(' 2026-12-01 ')).toBe('2026-12-01');
+    expect(dayInput(null)).toBeUndefined();
+  });
+
+  it('starts a welcome back two weeks ago by default and never in the future', () => {
+    expect(returnSince(undefined, '2026-11-25')).toBe('2026-11-11');
+    expect(returnSince('2026-11-25', '2026-11-25')).toBe('2026-11-25');
+    expect(() => returnSince('2026-11-26', '2026-11-25')).toThrow('The first day away (2026-11-26) is in the future.');
+    expect(() => returnSince('last week', '2026-11-25')).toThrow("Use dates as YYYY-MM-DD (got 'last week').");
+  });
+
+  it("computes today in the person's time zone, falling back to UTC", () => {
+    const lateEvening = new Date('2026-11-11T20:00:00Z');
+    expect(todayIn('Pacific/Kiritimati', lateEvening)).toBe('2026-11-12'); // UTC+14
+    expect(todayIn('America/Los_Angeles', new Date('2026-11-12T03:00:00Z'))).toBe('2026-11-11');
+    expect(todayIn(undefined, lateEvening)).toBe('2026-11-11');
+    expect(todayIn('Not/AZone', lateEvening)).toBe('2026-11-11');
   });
 
   it('does day arithmetic across month ends', () => {
@@ -75,8 +104,8 @@ describe('rankStandIns', () => {
       'Commented 2 times on PAY-101',
       'Worked on 2 other items in PAY-100 (Refunds v2)',
       'Knows the Payments component',
-      '2 recent items in PAY',
-      'Same team (Payments squad)',
+      'Has 2 recent items in PAY',
+      'In the same team (Payments squad)',
       'Already carries 9 open items',
     ]);
     expect(second?.accountId).toBe(CHEN.accountId);
@@ -91,6 +120,13 @@ describe('rankStandIns', () => {
     expect(rankStandIns(pay102, ctx)[0]?.accountId).toBe(BEN.accountId);
     const busy = { ...ctx, openLoad: { ...ctx.openLoad, [BEN.accountId]: 14 } };
     expect(rankStandIns(pay102, busy)[0]?.accountId).toBe(CHEN.accountId);
+  });
+
+  it('exposes the evidence points apart from the load penalty', () => {
+    const [best] = rankStandIns(pay101, ctx);
+    expect(contextPointsOf(best)).toBe(16);
+    expect(contextPointsOf({ reasons: [{ text: 'Chosen by hand', points: 0 }] })).toBe(0);
+    expect(contextPointsOf(undefined)).toBe(0);
   });
 
   it('grades confidence by context, not by score', () => {
@@ -208,5 +244,49 @@ describe('render', () => {
     expect(doc.content[0]!.content[0]).toEqual({ type: 'mention', attrs: { id: BEN.accountId, text: `@${BEN.displayName}` } });
     expect(JSON.stringify(doc)).toContain('you are covering PAY-101 while Ana Ruiz is away (1 Dec 2026 to 5 Dec 2026).');
     expect(JSON.stringify(doc)).toContain('PR needs one more review.');
+  });
+});
+
+describe('errors people see', () => {
+  it('gives each API status a plain message', () => {
+    expect(apiErrorMessage('jira', 401)).toBe(REAUTHORISE);
+    expect(apiErrorMessage('jira', 403)).toBe("You don't have permission to do this in Jira.");
+    expect(apiErrorMessage('confluence', 403)).toBe("You don't have permission to do this in Confluence.");
+    expect(apiErrorMessage('jira', 404)).toBe("Not found, or you don't have access to it.");
+    expect(apiErrorMessage('confluence', 409, 'create-page')).toBe('A page with this title already exists.');
+    expect(apiErrorMessage('jira', 429)).toBe('Atlassian is busy right now. Try again in a minute.');
+    expect(apiErrorMessage('confluence', 503)).toBe('Confluence had a temporary problem. Try again.');
+    expect(apiErrorMessage('jira', 500)).toBe('Jira had a temporary problem. Try again.');
+  });
+
+  it('keeps its own messages and hides anything unexpected', () => {
+    expect(userMessage(new Error('Pick a stand-in first.'))).toBe('Pick a stand-in first.');
+    expect(userMessage(new TypeError("Cannot read properties of undefined (reading 'fields')"))).toBe(UNEXPECTED);
+    expect(userMessage('boom')).toBe(UNEXPECTED);
+    const forge = (name: string) => Object.assign(new Error('Authentication Required'), { name });
+    expect(userMessage(forge('NEEDS_AUTHENTICATION_ERR'))).toBe(REAUTHORISE);
+    expect(userMessage(forge('FUNCTION_FETCH_ERR'))).toBe(UNREACHABLE);
+  });
+});
+
+describe('settleBy', () => {
+  it('reports a value, an error or a late answer, and never rejects', async () => {
+    const soon = Date.now() + 1_000;
+    expect(await settleBy(soon, async () => 7)).toEqual({ state: 'ok', value: 7 });
+    const failed = await settleBy(soon, async () => {
+      throw new Error('no');
+    });
+    expect(failed.state).toBe('error');
+    expect(await settleBy(Date.now() + 20, () => new Promise(() => undefined))).toEqual({ state: 'timeout' });
+  });
+
+  it('does not start work once the deadline has passed', async () => {
+    let started = false;
+    const r = await settleBy(Date.now() - 1, async () => {
+      started = true;
+      return 1;
+    });
+    expect(r).toEqual({ state: 'timeout' });
+    expect(started).toBe(false);
   });
 });

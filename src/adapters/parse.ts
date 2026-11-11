@@ -1,5 +1,6 @@
 // Pure parsers for Atlassian API responses. Kept apart from the HTTP calls so
 // they can be tested against recorded response shapes.
+import { addDays } from '../core/dates';
 import type { ReturnEvent, ReturnItem } from '../core/handback';
 import type { Activity, Goal, Page, PeerWork, Person, PullRequest, PullRequestStatus, StatusCategory, WorkItem } from '../core/types';
 
@@ -238,6 +239,9 @@ export function adfMentions(node: Json, out: string[] = []): string[] {
 
 const UNDERSTUDY_SIGNATURE = 'Sent with Understudy';
 
+/** Briefings are usually sent in the days before someone leaves, so look this far back for one. */
+const BRIEFING_LOOKBACK_DAYS = 14;
+
 /**
  * Reads one work item (searched with expand=changelog) and keeps only what
  * other people did since `since`: status moves, reassignments and comments.
@@ -263,15 +267,20 @@ export function parseReturnIssue(raw: Json, personId: string, since: string): Re
   }
 
   let mentionsYou = false;
+  const briefedFrom = addDays(since.slice(0, 10), -BRIEFING_LOOKBACK_DAYS);
   for (const c of raw?.fields?.comment?.comments ?? []) {
     const at = str(c?.created);
-    if (!at || at < since || c?.author?.accountId === personId) continue;
+    if (!at) continue;
     const text = adfText(c?.body);
-    const mentioned = adfMentions(c?.body).includes(personId);
+    // A briefing names the stand-in whoever sent it, most often the person
+    // themselves just before leaving, so it is read before the author and
+    // date checks below. It is never an event to catch up on. The latest wins.
     if (text.includes(UNDERSTUDY_SIGNATURE)) {
-      coveredBy = coveredBy ?? str(c?.body?.content?.[0]?.content?.[0]?.attrs?.text)?.replace(/^@/, '');
+      if (at >= briefedFrom) coveredBy = str(c?.body?.content?.[0]?.content?.[0]?.attrs?.text)?.replace(/^@/, '') ?? coveredBy;
       continue;
     }
+    if (at < since || c?.author?.accountId === personId) continue;
+    const mentioned = adfMentions(c?.body).includes(personId);
     mentionsYou = mentionsYou || mentioned;
     events.push({ at, by: str(c?.author?.displayName) ?? 'Someone', kind: mentioned ? 'mention' : 'comment', text: text.slice(0, 160) });
   }

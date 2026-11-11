@@ -70,6 +70,38 @@ describe('parseReturnIssue', () => {
     expect(r.coveredBy).toBe('Ben Okafor');
     expect(r.events).toEqual([]);
   });
+
+  const briefingOf = (standIn: { accountId: string; displayName: string }) =>
+    standInComment({ itemKey: 'OPS-7', standIn, ownerName: ANA.displayName, whyItMatters: [], because: [] });
+
+  it('keeps "covered by" when the person briefed their own stand-in, without counting it as news', () => {
+    const raw = issue('OPS-7', {
+      assignee: ANA.accountId,
+      comments: [{ author: ANA, created: '2026-12-01T08:00:00.000+0000', body: briefingOf(BEN) }],
+    });
+    const r = parseReturnIssue(raw, ANA.accountId, SINCE)!;
+    expect(r.coveredBy).toBe('Ben Okafor');
+    expect(r.events).toEqual([]);
+    expect(buildWelcomeBack([r], ANA, SINCE, '2026-12-08').stats.covered).toBe(1);
+  });
+
+  it('finds a briefing sent in the days before leaving, but not one from a past absence', () => {
+    const CHEN = { accountId: '712020:chen', displayName: 'Chen Wei' };
+    const raw = issue('OPS-7', {
+      comments: [
+        { author: ANA, created: '2026-10-01T08:00:00.000+0000', body: briefingOf(CHEN) },
+        { author: ANA, created: '2026-11-28T16:00:00.000+0000', body: briefingOf(BEN) },
+      ],
+    });
+    expect(parseReturnIssue(raw, ANA.accountId, SINCE)!.coveredBy).toBe('Ben Okafor');
+    const old = issue('OPS-7', { comments: [{ author: ANA, created: '2026-10-01T08:00:00.000+0000', body: briefingOf(CHEN) }] });
+    expect(parseReturnIssue(old, ANA.accountId, SINCE)!.coveredBy).toBeUndefined();
+  });
+
+  it("still ignores the person's own ordinary comments", () => {
+    const raw = issue('OPS-7', { comments: [{ author: ANA, created: '2026-12-02T08:00:00.000+0000', body: doc(text('Back on this.')) }] });
+    expect(parseReturnIssue(raw, ANA.accountId, SINCE)!.events).toEqual([]);
+  });
 });
 
 describe('buildWelcomeBack', () => {
@@ -110,6 +142,13 @@ describe('buildWelcomeBack', () => {
     ]);
     expect(w.stats).toEqual({ changed: 3, needsYou: 2, mentions: 1, finished: 1, reassigned: 1, covered: 0 });
     expect(w.headline).toBe('Since 1 Dec 2026, 3 items changed: 2 need Ana Ruiz, 1 finished.');
+  });
+
+  it('passes notes about skipped or capped results to the page and the agent', () => {
+    const w = buildWelcomeBack(items, ANA, SINCE, '2026-12-08', ['Showing the 50 most recent changes.']);
+    expect(w.notes).toEqual(['Showing the 50 most recent changes.']);
+    expect(toAgentReturnView(w).notes).toEqual(['Showing the 50 most recent changes.']);
+    expect(buildWelcomeBack(items, ANA, SINCE, '2026-12-08').notes).toEqual([]);
   });
 
   it('says plainly when nothing changed', () => {

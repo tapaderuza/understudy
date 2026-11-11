@@ -2,12 +2,14 @@
 // a customer's own agents and external MCP clients get the same answers.
 //
 // Inputs come from an LLM and may be wrong: identity always comes from the
-// invocation context, and every Atlassian call runs as that user.
+// invocation context, and every Atlassian call runs as that user. Dates are
+// checked first, so a wrong one is reported before any slow work.
 import { RISK_LABELS } from './core/risk';
 import { toAgentView } from './core/brief';
+import { checkAbsenceInput, dayInput } from './core/dates';
 import { toAgentReturnView } from './core/handback';
 import { isIssueKey } from './adapters/parse';
-import { notifyStandIn, prepare, publish, resolvePerson, standInsForItem, welcomeBack } from './service';
+import { failure, notifyStandIn, prepare, publish, resolvePerson, standInsForItem, welcomeBack } from './service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -28,10 +30,9 @@ function issueKeyOf(payload: Json): string | undefined {
   return typeof fromPage === 'string' && isIssueKey(fromPage) ? fromPage : undefined;
 }
 
-const fail = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
-
 export async function getHandoverBrief(payload: Json, context: Json) {
   try {
+    checkAbsenceInput(payload?.startDate, payload?.endDate);
     const requester = requesterOf(payload, context);
     const person = await resolvePerson(payload?.person, requester);
     const { brief } = await prepare({
@@ -43,16 +44,17 @@ export async function getHandoverBrief(payload: Json, context: Json) {
     });
     return toAgentView(brief);
   } catch (e) {
-    return fail(e);
+    return failure(e, 'get-handover-brief');
   }
 }
 
 export async function getWelcomeBackBrief(payload: Json, context: Json) {
   try {
+    dayInput(payload?.since);
     const person = await resolvePerson(payload?.person, requesterOf(payload, context));
     return toAgentReturnView(await welcomeBack(person, payload?.since));
   } catch (e) {
-    return fail(e);
+    return failure(e, 'get-welcome-back-brief');
   }
 }
 
@@ -60,7 +62,8 @@ export async function suggestStandIns(payload: Json, context: Json) {
   try {
     const key = issueKeyOf(payload);
     if (!key) throw new Error('Tell me which work item, for example PAY-101.');
-    const r = await standInsForItem(key, requesterOf(payload, context), cloudOf(payload, context));
+    const r = await standInsForItem(key, cloudOf(payload, context));
+    if (r.unassigned) return { item: r.item, owner: null, whyItMatters: [], candidates: [], note: r.message };
     const entry = r.brief.items.find((b) => b.item.key === key);
     return {
       item: r.item,
@@ -76,7 +79,7 @@ export async function suggestStandIns(payload: Json, context: Json) {
       note: r.candidates.length ? undefined : `Nobody else has recorded context on ${key}. Suggest a walkthrough before ${r.owner.displayName} leaves.`,
     };
   } catch (e) {
-    return fail(e);
+    return failure(e, 'suggest-stand-ins');
   }
 }
 
@@ -84,6 +87,7 @@ export async function publishHandoverPage(payload: Json, context: Json) {
   try {
     const spaceKey = typeof payload?.spaceKey === 'string' ? payload.spaceKey.trim() : '';
     if (!spaceKey) throw new Error('Which Confluence space should the handover page go in? Give its space key.');
+    checkAbsenceInput(payload?.startDate, payload?.endDate);
     const person = await resolvePerson(payload?.person, requesterOf(payload, context));
     const { brief } = await prepare({
       personId: person.accountId,
@@ -95,7 +99,7 @@ export async function publishHandoverPage(payload: Json, context: Json) {
     const page = await publish(brief, { key: spaceKey });
     return { published: true, title: page.title, url: page.url, headline: brief.headline };
   } catch (e) {
-    return fail(e);
+    return failure(e, 'publish-handover-page');
   }
 }
 
@@ -104,18 +108,18 @@ export async function briefStandIn(payload: Json, context: Json) {
     const key = issueKeyOf(payload);
     if (!key) throw new Error('Tell me which work item, for example PAY-101.');
     if (typeof payload?.standIn !== 'string' || !payload.standIn.trim()) throw new Error('Who is the stand-in?');
+    checkAbsenceInput(payload?.startDate, payload?.endDate);
     const requester = requesterOf(payload, context);
     const standIn = await resolvePerson(payload.standIn, requester);
     return await notifyStandIn({
       issueKey: key,
       standIn,
-      requesterId: requester,
       cloudId: cloudOf(payload, context),
       start: payload?.startDate,
       end: payload?.endDate,
       note: typeof payload?.note === 'string' ? payload.note : undefined,
     });
   } catch (e) {
-    return fail(e);
+    return failure(e, 'brief-stand-in');
   }
 }

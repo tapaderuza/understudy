@@ -89,11 +89,11 @@ export function rankStandIns(
     }
     const sameProject = theirs.filter((p) => p.projectKey === item.projectKey).length;
     if (sameProject > 0) {
-      reasons.push({ text: `${plural(sameProject, 'recent item')} in ${item.projectKey}`, points: Math.min(3, sameProject) });
+      reasons.push({ text: `Has ${plural(sameProject, 'recent item')} in ${item.projectKey}`, points: Math.min(3, sameProject) });
     }
     const mate = ctx.teammates.find((t) => t.accountId === accountId);
     if (mate) {
-      reasons.push({ text: mate.teams[0] ? `Same team (${mate.teams[0]})` : 'Same team', points: 1 });
+      reasons.push({ text: mate.teams[0] ? `In the same team (${mate.teams[0]})` : 'In the same team', points: 1 });
     }
 
     const context = reasons.reduce((sum, r) => sum + r.points, 0);
@@ -108,6 +108,14 @@ export function rankStandIns(
 
   out.sort((a, b) => b.score - a.score || a.load - b.load || a.displayName.localeCompare(b.displayName));
   return out.slice(0, limit);
+}
+
+/**
+ * Points from evidence only, before any load penalty: what an evidence bar
+ * should show. Zero for a stand-in chosen by hand with no evidence.
+ */
+export function contextPointsOf(c: { reasons: Reason[] } | undefined): number {
+  return (c?.reasons ?? []).reduce((sum, r) => sum + Math.max(0, r.points), 0);
 }
 
 /**

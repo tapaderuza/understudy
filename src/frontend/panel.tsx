@@ -1,7 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import ForgeReconciler, { Box, Inline, LoadingButton, Lozenge, SectionMessage, Spinner, Stack, Strong, Text, TextArea, User, xcss } from '@forge/react';
+import ForgeReconciler, {
+  Box,
+  Button,
+  Heading,
+  Inline,
+  Label,
+  LoadingButton,
+  Lozenge,
+  SectionMessage,
+  Spinner,
+  Stack,
+  Strong,
+  Text,
+  TextArea,
+  User,
+  xcss,
+} from '@forge/react';
 import { invoke } from '@forge/bridge';
 import type { IssuePanelData } from '../resolvers';
+import { Evidence, contextPoints, plainNumber } from './evidence';
 
 type Failure = { error: string };
 const isFailure = (x: unknown): x is Failure => typeof x === 'object' && x !== null && 'error' in x;
@@ -16,12 +33,14 @@ async function call<T>(key: string, payload?: Record<string, unknown>): Promise<
   }
 }
 
+/** Reads a field the resolver may or may not send yet (e.g. noAssignee). */
+const fieldOf = (o: object, k: string): unknown => (o as Record<string, unknown>)[k];
+
 const card = xcss({
-  borderColor: 'color.border',
-  borderStyle: 'solid',
-  borderWidth: 'border.width',
-  borderRadius: 'radius.medium',
-  padding: 'space.100',
+  backgroundColor: 'elevation.surface.raised',
+  boxShadow: 'elevation.shadow.raised',
+  borderRadius: 'radius.large',
+  padding: 'space.150',
 });
 
 const CONFIDENCE = {
@@ -36,6 +55,7 @@ const Panel = () => {
   const [note, setNote] = useState('');
   const [sending, setSending] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     call<IssuePanelData>('issueStandIns').then((r) => (isFailure(r) ? setError(r.error) : setData(r)));
@@ -57,59 +77,115 @@ const Panel = () => {
       </SectionMessage>
     );
   }
-  if (!data) return <Spinner label="Finding who could cover this" />;
+  if (!data) {
+    return (
+      <Stack space="space.100" alignInline="center">
+        <Spinner label="Finding who could cover this" />
+        <Text size="small" color="color.text.subtle">
+          Reading comments, related work and team load
+        </Text>
+      </Stack>
+    );
+  }
+
+  const key = data.item?.key ?? 'this work item';
+  const ownerName = data.owner?.displayName;
+  // The resolver may flag this as noAssignee or unassigned, or just send no owner.
+  if (fieldOf(data, 'noAssignee') === true || fieldOf(data, 'unassigned') === true || !data.owner?.accountId) {
+    const message = fieldOf(data, 'notice') ?? fieldOf(data, 'message');
+    return (
+      <SectionMessage appearance="information" title="This work item has no assignee">
+        <Text>
+          {typeof message === 'string' && message
+            ? message
+            : `Assign ${key} to someone and Understudy shows who could cover it while they are away.`}
+        </Text>
+      </SectionMessage>
+    );
+  }
+
+  const best = data.candidates[0];
+  const shown = data.candidates.slice(0, 3);
 
   return (
-    <Stack space="space.150">
-      <Text>
-        If <Strong>{data.owner.displayName}</Strong> is away, who could cover {data.item.key}?
-      </Text>
-      <Inline space="space.050" shouldWrap>
-        <Lozenge appearance={CONFIDENCE[data.confidence].appearance}>{CONFIDENCE[data.confidence].text}</Lozenge>
-        {data.whyItMatters.map((w) => (
-          <Lozenge key={w}>{w}</Lozenge>
-        ))}
-      </Inline>
+    <Stack space="space.200">
+      <Stack space="space.075">
+        <Heading size="small" as="h3">
+          {best ? `${best.displayName} can cover ${key}` : `Nobody else has context on ${key}`}
+        </Heading>
+        <Text size="small" color="color.text.subtle">
+          If <Strong>{ownerName ?? 'the assignee'}</Strong> is away, this is who already knows the work.
+        </Text>
+        <Inline space="space.050" shouldWrap>
+          <Lozenge appearance={CONFIDENCE[data.confidence].appearance}>{CONFIDENCE[data.confidence].text}</Lozenge>
+          {data.whyItMatters.map((w) => (
+            <Lozenge key={w}>{w}</Lozenge>
+          ))}
+        </Inline>
+      </Stack>
 
-      {data.candidates.length === 0 && (
-        <SectionMessage appearance="discovery" title="Nobody else has context yet">
+      {shown.length === 0 && (
+        <SectionMessage appearance="discovery" title="Book a short walkthrough">
           <Text>No one else has commented on this item or worked nearby. A 15-minute walkthrough now saves days later.</Text>
         </SectionMessage>
       )}
 
-      {data.candidates.slice(0, 3).map((c, i) => (
-        <Box key={c.accountId} xcss={card}>
-          <Stack space="space.075">
-            <Inline spread="space-between" alignBlock="center">
-              <User accountId={c.accountId} />
-              {i === 0 ? <Lozenge appearance="success">Best fit</Lozenge> : <Text size="small">{`Score ${c.score}`}</Text>}
-            </Inline>
-            {c.reasons.map((r) => (
-              <Text key={r.text} size="small" color={r.points < 0 ? 'color.text.warning' : 'color.text.subtle'}>
-                {r.points > 0 ? `+${r.points}` : String(r.points)} {r.text}
-              </Text>
-            ))}
-            {sent ? null : (
-              <LoadingButton spacing="compact" isLoading={sending === c.accountId} onClick={() => brief(c.accountId)}>
-                Brief {c.displayName}
-              </LoadingButton>
-            )}
-          </Stack>
-        </Box>
-      ))}
+      {shown.map((c, i) => {
+        const open = Boolean(expanded[c.accountId]);
+        return (
+          <Box key={c.accountId} xcss={card}>
+            <Stack space="space.100">
+              <Inline space="space.100" alignBlock="center" spread="space-between" shouldWrap>
+                <Inline space="space.100" alignBlock="center">
+                  <User accountId={c.accountId} />
+                  {i === 0 && <Lozenge appearance="success">Best fit</Lozenge>}
+                </Inline>
+                <Text size="small" color="color.text.subtle">{`Score ${plainNumber(c.score)}`}</Text>
+              </Inline>
+              <Evidence name={c.displayName} reasons={c.reasons} high={contextPoints(c) >= 6} showAll={open} />
+              <Inline space="space.100" alignBlock="center" shouldWrap>
+                {sent ? null : (
+                  <LoadingButton
+                    spacing="compact"
+                    appearance={i === 0 ? 'primary' : 'default'}
+                    isLoading={sending === c.accountId}
+                    isDisabled={sending !== null && sending !== c.accountId}
+                    onClick={() => brief(c.accountId)}
+                  >
+                    {`Brief ${c.displayName}`}
+                  </LoadingButton>
+                )}
+                {c.reasons.length > 0 && (
+                  <Button
+                    appearance="subtle"
+                    spacing="compact"
+                    onClick={() => setExpanded((prev) => ({ ...prev, [c.accountId]: !open }))}
+                  >
+                    {open ? 'Hide full reasons' : 'Show full reasons'}
+                  </Button>
+                )}
+              </Inline>
+            </Stack>
+          </Box>
+        );
+      })}
 
       {sent ? (
-        <SectionMessage appearance="success">
+        <SectionMessage appearance="success" title="Stand-in briefed">
           <Text>{sent}</Text>
         </SectionMessage>
       ) : (
-        data.candidates.length > 0 && (
-          <TextArea
-            name="note"
-            placeholder="Optional note for the stand-in, e.g. where the runbook is."
-            value={note}
-            onChange={(e) => setNote(String(e.target.value ?? ''))}
-          />
+        shown.length > 0 && (
+          <Stack space="space.050">
+            <Label labelFor="panel-note">Note for the stand-in (optional)</Label>
+            <TextArea
+              id="panel-note"
+              name="note"
+              placeholder="For example, where the runbook is."
+              value={note}
+              onChange={(e) => setNote(String(e.target.value ?? ''))}
+            />
+          </Stack>
         )
       )}
     </Stack>

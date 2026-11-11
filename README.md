@@ -23,9 +23,9 @@ The live app on a real Atlassian site: build a handover, the evidence behind eac
 
 | Where | What you get |
 | --- | --- |
-| **Jira › Apps › Understudy › Before you go** | Pick a person and dates. See the headline ("Ana has 7 open items: 3 must be covered from 1 Dec, 2 fall due before 5 Dec, 1 only Ana has context on"), the cover plan, who covers what, code in flight, goals, pages. Change any stand-in, brief them, publish the page. |
+| **Jira › Apps › Understudy › Before you go** | Pick a person and dates. See the headline ("Ada Isadora has 7 open items: 4 must be covered from 12 Nov 2026, 2 fall due before 15 Nov 2026, 1 already overdue, 1 only Ada Isadora has context on"), the cover plan, who covers what, code in flight, goals, pages. Change any stand-in, brief them, publish the page. |
 | **Jira › Apps › Understudy › Welcome back** | What changed since your first day away, needs-you items first, and who covered what. |
-| **Work item › Understudy panel** | "If Ana is away, who could cover PAY-101?" Top three people with reasons, one-click briefing. |
+| **Work item › Understudy panel** | "If Ada Isadora is away, who could cover PAY-2?" Top three people with reasons, one-click briefing. |
 | **Rovo chat › Understudy agent** | "Prepare my handover for next week", "Who should cover this?", "I'm back, what needs me first?" |
 | **Rovo Studio and MCP clients** | Five tools (`get-handover-brief`, `suggest-stand-ins`, `publish-handover-page`, `brief-stand-in`, `get-welcome-back-brief`) and two open `SKILL.md` playbooks. |
 
@@ -47,6 +47,12 @@ Every suggestion comes with reasons a person can check in Jira. Points per candi
 Items are handled in order of urgency (overdue, due while away, blocked, high priority, open pull request, someone waiting for a reply, in progress), and every assignment adds to that stand-in's load, so the plan balances itself. An item whose best stand-in has fewer than 3 points of context is flagged as **only you know this**: it needs a walkthrough, not just a reassignment. When everyone with context is already overloaded (load penalty larger than their context), Understudy suggests nobody and asks a person to pick.
 
 Only active people count: apps such as Automation for Jira, service desk customers and deactivated accounts are never suggested, and Understudy's own briefing comments are not counted as evidence. When someone has more open items than Understudy reads at once (100), the plan covers the most urgent ones and says so.
+
+## How it differs
+
+- **Out-of-office apps** on the Marketplace make you name a coverer in advance and then reassign by rule. Understudy suggests a stand-in for each work item from evidence anyone can check in Jira, and shows why.
+- **Rules move tickets.** Understudy changes no assignee. It finds the work only you understand, so it gets a walkthrough instead of a silent reassignment, and spreads the load so your one expert is not buried.
+- **Chat assistants** summarize what you missed after you return. Understudy plans the cover before you leave, briefs each stand-in on the work item itself, publishes the handover page, and then closes the loop when you are back.
 
 ## How it is built
 

@@ -1,6 +1,6 @@
 # Codegeist 2026 submission: Understudy
 
-Text to paste into the Devpost form. Fill the bracketed values after deploying. All submission material must be in English (Official Rules, Language Requirements).
+Text to paste into the Devpost form. All submission material must be in English (Official Rules, Language Requirements).
 
 ---
 
@@ -14,7 +14,9 @@ Going away? Understudy hands your Jira work to the right people with the context
 
 ## Category
 
-**Apps for Business Teams.** Handovers before leave are a people problem every team has (finance, ops, support, engineering), and the demo shows finance and operations work as well as code. If the sponsor prefers, it also fits Apps for Software Teams.
+**Apps for Business Teams.** Handovers before leave are a people problem every team has (finance, ops, support, engineering), and the demo shows finance and operations work as well as code.
+
+**Who it's for.** Anyone in a business team whose work lives in Jira and who goes on leave or covers for someone: a finance lead handing over the quarter-end close, an HR operations specialist before parental leave, a support team lead before a conference. And their managers, who can build the handover for a teammate and see who covers what.
 
 ## Bonus prizes to tick
 
@@ -45,6 +47,10 @@ Every team has the same Thursday-before-leave ritual: a rushed handover doc, a l
 
 The context to do this well already exists in Atlassian: who commented on what, who works in the same epic and components, who is on your team, which pull requests are open, which goals your work rolls up to. Codegeist asked us to turn that connected context into confident decisions. A handover is exactly that decision.
 
+### Why it matters
+
+Handovers weigh on people before and after leave. [46% of US workers with paid time off take less than they are offered, and 43% of them would feel bad about coworkers taking on extra work](https://www.pewresearch.org/social-trends/2023/03/30/how-americans-view-their-jobs/) (Pew Research Center, 2023). Coming back is slow: [53% of knowledge workers need three or more days to feel caught up after time off](https://finviz.com/news/387479/zoom-study-reveals-inbox-anxiety-is-the-hidden-cost-of-vacation) (Zoom and Morning Consult, 2026; a vendor-commissioned survey). And what a rushed handover loses is often held by one person: [42% of institutional knowledge is unique to the person in the role](https://www.hrdive.com/news/inefficient-knowledge-sharing-costs-large-us-businesses-47m-a-year/527892/) (Panopto and YouGov, 2018, via HR Dive). Understudy works on all three: it spreads the cover so nobody is buried, flags the knowledge only you hold, and shows what needs you first when you return.
+
 ### What it does
 
 **Before you go.** Pick a person and dates. Understudy reads their open Jira work and ranks it by what must be covered: overdue, due while away, blocked, high priority, open pull request, someone waiting for a reply, in progress. For each item it suggests a stand-in **with the evidence**: "Commented 2 times on this item (+6), worked on 2 other items in Refunds v2 (+6), knows the Payments component (+1), already carries 9 open items (−2)". It assigns items in order of urgency and counts each assignment against that person's load, so the plan spreads work instead of burying the expert.
@@ -53,13 +59,18 @@ It also flags **work only you have context on**: items where nobody else has com
 
 Then one click briefs each stand-in: a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Another click publishes the whole handover as a Confluence page.
 
-**Welcome back.** When you return, Understudy shows what other people did on your work since your first day away (status changes, reassignments, comments), with what needs you first: mentions, items handed to you, replies waiting. It recognises its own briefings, so it can tell you which stand-in covered what.
+**Welcome back.** When you return, Understudy shows what other people did on your work since your first day away (status changes, reassignments, comments), with what needs you first: mentions, items handed to you, replies waiting. It recognizes its own briefings, so it can tell you which stand-in covered what.
 
 **Everywhere you work:**
 - a Jira page with two tabs, *Before you go* and *Welcome back*;
 - an Understudy panel on every work item: "If Ada is away, who could cover this?";
 - a Rovo agent ("Prepare my handover for next week", "I'm back, what needs me first?");
 - an MCP server and two open skills, so a team's own Rovo Studio agents, or Claude and other MCP clients, can plan handovers too.
+
+**How it differs:**
+- Out-of-office apps on the Marketplace make you name a coverer in advance and then reassign by rule; Understudy suggests a stand-in for each work item from evidence anyone can check in Jira, and shows why.
+- Rules move tickets; Understudy changes no assignee. It finds the work only you understand, so it gets a walkthrough instead of a silent reassignment, and spreads the load so your one expert is not buried.
+- Chat assistants summarize what you missed after you return; Understudy plans the cover before you leave, briefs each stand-in on the work item itself, publishes the handover page, and then closes the loop when you are back.
 
 ### How we built it
 
@@ -83,6 +94,7 @@ Then one click briefs each stand-in: a comment on the work item that @-mentions 
 - The "only you know this" warning: the part of a handover that usually gets lost, found automatically.
 - One engine behind four surfaces (page, issue panel, Rovo agent, MCP), so they always agree.
 - A complete loop: hand over, brief, publish, and hand back.
+- Every surface (the Jira page, the work item panel, the Rovo agent and the MCP tools) was exercised live on an Atlassian demo site; the Teamwork Graph queries are implemented and degrade gracefully, and for the demo site's fictional users the graph returned no data, which the app reports in its sources line ("Teamwork Graph no data") instead of hiding.
 
 ### What we learned
 
@@ -106,9 +118,9 @@ Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates
 4. Open any work item and expand the **Understudy** panel.
 5. Jira › Apps › Understudy › **Welcome back**: choose a first day away and press **What changed?**
 6. Rovo chat › **Understudy** agent: try "Prepare my handover for next week".
-7. Optional MCP: enable the tools for external clients in Connected apps, then connect an MCP client to `https://mcp.atlassian.com/forge/[appId]`.
+7. Optional MCP: enable the tools for external clients in Connected apps, then connect an MCP client to `https://mcp.atlassian.com/forge/f822ce82-2fbb-4e00-878f-0798dda01b8c`.
 
-A test site with seeded demo data: [site URL, and a test account if you share one]
+Understudy works on any Jira site where people share projects, epics and components. For an empty development site, `scripts/seed-demo.mjs` creates a small fictional team's work to try it on.
 
 ## Built with
 
