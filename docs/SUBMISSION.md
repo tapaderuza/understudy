@@ -37,7 +37,7 @@ Distribution is set to "Sharing with anyone" (production environment, Jira, with
 
 ## Demo video (YouTube, public, under 5 minutes)
 
-https://youtu.be/pooYSBFNaFw (public, 2:37)
+https://youtu.be/s1VzERdO49g (public, 2:48)
 
 ## About the project
 
@@ -57,7 +57,7 @@ Handovers weigh on people before and after leave. [46% of US workers with paid t
 
 It also flags **work only you have context on**: items where nobody else has commented or worked nearby. Those need a 15-minute walkthrough before you leave, not a reassignment, and that is the knowledge most handovers lose.
 
-Then one click briefs each stand-in: a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Another click publishes the whole handover as a Confluence page.
+Then one click briefs every stand-in (or one at a time): a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Another click publishes the whole handover as a Confluence page.
 
 **Welcome back.** When you return, Understudy shows what other people did on your work since your first day away (status changes, reassignments, comments), with what needs you first: mentions, items handed to you, replies waiting. It recognizes its own briefings, so it can tell you which stand-in covered what.
 
@@ -80,7 +80,7 @@ Then one click briefs each stand-in: a comment on the work item that @-mentions 
 - **Teamwork Graph API:** curated queries `atlassianUserInTeams` and `atlassianTeamMembers` (who is on the person's teams), `atlassianUserPullRequests` and `jiraWorkItemLinkedExternalPullRequests` (code in flight, batched with GraphQL aliases) and `atlassianUserGoalsAndProjects` (what the work rolls up to). Each query has a plainer fallback, and missing scopes degrade to "not available" rather than failing the handover.
 - **Jira and Confluence REST:** enhanced JQL search (with changelogs for Welcome back), ADF comments with mentions, watchers, CQL page search, and v2 pages to publish.
 - **Design for trust:** every call runs as the user (`asUser`), the graph is read-only, nothing is stored, nothing leaves Atlassian, and Understudy only writes (a comment, a watcher, a page) after a person confirms. Agent inputs come from an LLM, so identity always comes from the invocation context, and every key and account ID is validated before it reaches JQL.
-- **Quality:** the scoring, planning, rendering and parsing logic is pure TypeScript with 37 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
+- **Quality:** the scoring, planning, rendering and parsing logic is pure TypeScript with 67 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
 
 ### Challenges we ran into
 
@@ -94,7 +94,7 @@ Then one click briefs each stand-in: a comment on the work item that @-mentions 
 - The "only you know this" warning: the part of a handover that usually gets lost, found automatically.
 - One engine behind four surfaces (page, issue panel, Rovo agent, MCP), so they always agree.
 - A complete loop: hand over, brief, publish, and hand back.
-- Every surface (the Jira page, the work item panel, the Rovo agent and the MCP tools) was exercised live on an Atlassian demo site; the Teamwork Graph queries are implemented and degrade gracefully, and for the demo site's fictional users the graph returned no data, which the app reports in its sources line ("Teamwork Graph no data") instead of hiding.
+- Every surface was exercised live on an Atlassian demo site: the Jira page, the work item panel, the Rovo agent, and the MCP tools from an external client (MCP Inspector) through Atlassian's MCP server. The Teamwork Graph queries are implemented and degrade gracefully: on the demo site the graph had no data for the fictional users and refused queries for our university-managed account, and the app says so in its sources line instead of hiding it.
 
 ### What we learned
 
