@@ -18,7 +18,7 @@ Going away? Understudy hands your Jira work to the right people with the context
 
 ## Bonus prizes to tick
 
-The rules allow one Grand Prize plus one Bonus Prize per submission. Tick all that apply:
+The rules allow one Grand Prize plus one Bonus Prize per submission, and the Devpost form takes **one** bonus prize. The draft picks **Best Agents (Rovo)**, the strongest and fully live part; the other two below are still worth describing in the story:
 
 - **Best Agents (Rovo).** Forge `rovo:agent` with five `action` modules and two reusable `rovo:skill` modules (`handover-planner`, `welcome-back`) that other agents can load.
 - **Best app with Atlassian MCP.** `rovo:mcp` exposes the five actions as tools; the two `SKILL.md` files in the repo are open-source skill files users can add to third-party agents.
@@ -26,7 +26,12 @@ The rules allow one Grand Prize plus one Bonus Prize per submission. Tick all th
 
 ## Installation link
 
-[Paste the link from the developer console › Understudy › Distribution › Share]
+Distribution is set to "Sharing with anyone" (production environment, Jira, with Confluence as an optional connection). Copy the link with the copy icon in developer.atlassian.com › Console › Understudy › Distribution › Installation link, and paste it here and in the Devpost form.
+
+## Try it out links
+
+- Code: https://github.com/tapaderuza/understudy
+- Privacy policy: https://github.com/tapaderuza/understudy/blob/main/PRIVACY.md
 
 ## Demo video (YouTube, public, under 5 minutes)
 
@@ -52,7 +57,7 @@ Then one click briefs each stand-in: a comment on the work item that @-mentions 
 
 **Everywhere you work:**
 - a Jira page with two tabs, *Before you go* and *Welcome back*;
-- an Understudy panel on every work item: "If Ana is away, who could cover this?";
+- an Understudy panel on every work item: "If Ada is away, who could cover this?";
 - a Rovo agent ("Prepare my handover for next week", "I'm back, what needs me first?");
 - an MCP server and two open skills, so a team's own Rovo Studio agents, or Claude and other MCP clients, can plan handovers too.
 
