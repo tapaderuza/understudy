@@ -125,7 +125,7 @@ Context only builds confidence when people can see where it came from. Evidence 
 
 ## How the project meets the main technology requirement
 
-Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates with Jira (global page, issue panel, JQL, comments, watchers), Confluence (page search and publishing), Rovo (agent, eight actions, three skills, MCP) and the Teamwork Graph API (five curated queries, read-only `read:graph:*` scopes).
+Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates with Jira (global page, issue panel, a product event trigger that drafts a handover on time-off work items, JQL, comments, watchers), Confluence (page search and publishing), Rovo (agent, eight actions, three skills, MCP) and the Teamwork Graph API (five curated queries, read-only `read:graph:*` scopes).
 
 ## Testing instructions for judges
 
