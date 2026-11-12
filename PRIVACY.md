@@ -8,8 +8,8 @@ Understudy is a Forge app for Jira and Confluence. It helps a person hand over t
 
 - Understudy **stores no personal data** and keeps no database of its own.
 - It runs entirely on Atlassian Forge, inside Atlassian's cloud. It sends **no data to any service outside Atlassian**.
-- It reads data **as the person using it** (`asUser`), so it can only see what that person can already see.
-- It **writes only when a person asks it to**: a comment and a watcher on a work item, or a Confluence page.
+- It reads data **as the person using it** (`asUser`), so it can only see what that person can already see. The one exception is the draft handover described below, which Understudy prepares as the app.
+- It **writes only when a person asks it to**: a comment and a watcher on a work item, or a Confluence page. The exception: when someone creates a work item that announces time off (for example with the label `time-off`), Understudy posts one comment on that item with a draft handover for the person going away. The draft lists work item keys and people's names, no summaries, and is not sent to anyone else.
 
 ## What Understudy reads
 

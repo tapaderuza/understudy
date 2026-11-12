@@ -16,7 +16,7 @@ It works in four places: a Jira page with three tabs, a panel on every work item
 
 ## Demo video
 
-[![Understudy demo video, 3 minutes 5 seconds](docs/gallery/demo-video-thumbnail.png)](https://youtu.be/SRo6VDJBfxs)
+[![Understudy demo video, 3 minutes 19 seconds](docs/gallery/demo-video-thumbnail.png)](https://youtu.be/TAXImrdPv20)
 
 The live app on a real Atlassian site: build a handover, the evidence behind each stand-in, the warning for what only the person knows, briefing and publishing, the work item panel, the Rovo agent, MCP and Welcome back (2:48). The video was recorded before the Team risk tab; a new cut will be linked here when ready.
 
@@ -93,7 +93,7 @@ The handover's "only you know this" warning counts only work that must be covere
 - **Teamwork Graph API** (curated queries, no Cypher to register): the person's teams and teammates (`atlassianUserInTeams`, `atlassianTeamMembers`), their pull requests (`atlassianUserPullRequests`), pull requests linked to each work item (`jiraWorkItemLinkedExternalPullRequests`, batched with aliases), and goals and projects (`atlassianUserGoalsAndProjects`). Each query has a plainer fallback, and each source reports its own state in the sources line (connected, no data, not available), so a missing scope or an empty graph never fails the handover. On the Forge demo site, the graph intermittently refused reads with "User is not permitted to query this organization" (a known demo-site issue, reported on the Atlassian developer community) and did not link some fictional users to their teams. Understudy now retries that refusal (up to 3 times, with backoff), and when the graph links a person to no team it looks through the teams of the person asking and checks the member lists. With that, the demo site returns the signed-in user's teams and goals and "In the same team (Payments squad)" evidence for teammates such as Ryan Lee. Ada Isadora, the person in the video, was still missing from the graph's member list when it was recorded, so her plan shows "Teamwork Graph no data": the app says what is missing instead of hiding it.
 - **Jira REST:** enhanced JQL search (with `expand=changelog` for Welcome back), users, comments with @-mentions in ADF (added, or updated for a repeat briefing), watchers.
 - **Confluence REST:** CQL search for recent pages, v2 spaces and pages to publish the handover.
-- **Everything runs as the user** (`asUser`), so nobody sees work they couldn't already open. The graph is read-only. Understudy writes only when a person confirms: a comment, a watcher, or a page. It stores nothing and calls no external service. Details in [PRIVACY.md](PRIVACY.md).
+- **Everything a person opens runs as that person** (`asUser`), so nobody sees work they couldn't already open. The graph is read-only. Understudy writes a comment, a watcher or a page only when a person confirms, with one exception it announces: the draft handover on a time-off work item, which runs as the app, is posted on that item for the person going away, lists keys and names only, and briefs nobody. It stores nothing, never reassigns work, and calls no external service. Details in [PRIVACY.md](PRIVACY.md).
 
 ## Install and test (for judges)
 

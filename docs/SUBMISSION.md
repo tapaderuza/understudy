@@ -37,7 +37,7 @@ Distribution is set to "Sharing with anyone" (production environment, Jira, with
 
 ## Demo video (YouTube, public, under 5 minutes)
 
-https://youtu.be/SRo6VDJBfxs (public, 3:05). It shows the whole app live, including Team risk.
+https://youtu.be/TAXImrdPv20 (public, 3:19). It shows the whole app live, including Team risk.
 
 ## About the project
 
@@ -94,7 +94,7 @@ The handover warning counts only work that must be covered while someone is away
 - **Acting on its own:** a Forge product event `trigger` on created and updated work items (`ignoreSelf`, so its own comments never start it again) recognizes time-off items and runs the same engine. There is no signed-in person in a trigger, so an `AsyncLocalStorage` switch routes every Atlassian call through `asApp` for that run, and Teamwork Graph, which only answers people, is left out. The draft is signed "Prepared by Understudy." so it is posted once and never counts as evidence.
 - **Teamwork Graph API:** curated queries `atlassianUserInTeams` and `atlassianTeamMembers` (who is on the person's teams), `atlassianUserPullRequests` and `jiraWorkItemLinkedExternalPullRequests` (the user's pull requests and those linked to each work item, batched with GraphQL aliases) and `atlassianUserGoalsAndProjects` (what the work rolls up to). Each query has a plainer fallback, and each source reports its own state (connected, no data, not available), so missing scopes or an empty graph never fail the handover. On the Forge demo site, the graph intermittently refused reads with "User is not permitted to query this organization" (a known demo-site issue, reported on the Atlassian developer community) and did not link some fictional users to their teams. Understudy now retries that refusal (up to 3 times, with backoff), and when the graph links a person to no team it looks through the teams of the person asking and checks the member lists. With that, the demo site returns the signed-in user's teams and goals and "In the same team (Payments squad)" evidence for teammates such as Ryan Lee. Ada Isadora, the person in the video, was still missing from the graph's member list when it was recorded, so her plan shows "Teamwork Graph no data": the app says what is missing instead of hiding it.
 - **Jira and Confluence REST:** enhanced JQL search (with changelogs for Welcome back), ADF comments with mentions (a repeat briefing updates the earlier comment), watchers, CQL page search, and v2 pages to publish.
-- **Design for trust:** every call runs as the user (`asUser`), the graph is read-only, nothing is stored, nothing leaves Atlassian, and Understudy only writes (a comment, a watcher, a page) after a person confirms. Agent inputs come from an LLM, so identity always comes from the invocation context, and every key and account ID is validated before it reaches JQL.
+- **Design for trust:** everything a person opens runs as that person (`asUser`), the graph is read-only, nothing is stored, nothing leaves Atlassian, and Understudy writes a comment, a watcher or a page only after a person confirms. The one exception is the draft on a time-off work item: it runs as the app (there is no signed-in person in a trigger), is posted on that item for the person going away, lists keys and names only, and briefs nobody. Agent inputs come from an LLM, so identity always comes from the invocation context, and every key and account ID is validated before it reaches JQL.
 - **Quality:** the scoring, planning, team-risk, rendering and parsing logic is pure TypeScript with 90 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
 
 ### Challenges we ran into
@@ -149,4 +149,4 @@ forge, ui-kit, rovo, rovo-agent, rovo-skill, rovo-mcp, teamwork-graph, graphql, 
 
 # Demo video
 
-The demo video is https://youtu.be/SRo6VDJBfxs (3:05). It was recorded live on the Forge demo site with the fictional people that come with it (Ada Isadora, Max Taylor, Cassi Owens, Ryan Lee) and the projects PAY, OPS and FIN: the handover plan, briefing and publishing, Team risk with a walkthrough request, the work item panel, the Rovo agent, an external MCP client and Welcome back.
+The demo video is https://youtu.be/TAXImrdPv20 (3:19). It was recorded live on the Forge demo site with the fictional people that come with it (Ada Isadora, Max Taylor, Cassi Owens, Ryan Lee) and the projects PAY, OPS and FIN: the handover plan, briefing and publishing, the draft Understudy posts on its own on a time-off request, Team risk with a walkthrough request, the work item panel, the Rovo agent, an external MCP client and Welcome back.
