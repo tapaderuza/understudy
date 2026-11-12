@@ -16,7 +16,7 @@ It works in four places: a Jira page with three tabs, a panel on every work item
 
 ## Demo video
 
-[![Understudy demo video, 2 minutes 48 seconds](docs/gallery/demo-video-thumbnail.png)](https://youtu.be/s1VzERdO49g)
+[![Understudy demo video, 3 minutes 5 seconds](docs/gallery/demo-video-thumbnail.png)](https://youtu.be/SRo6VDJBfxs)
 
 The live app on a real Atlassian site: build a handover, the evidence behind each stand-in, the warning for what only the person knows, briefing and publishing, the work item panel, the Rovo agent, MCP and Welcome back (2:48). The video was recorded before the Team risk tab; a new cut will be linked here when ready.
 
