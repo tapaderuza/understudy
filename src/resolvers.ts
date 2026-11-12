@@ -1,14 +1,15 @@
 // Backend for the Jira page. Every resolver returns { error } instead of
 // throwing, so the page can show a readable message (never a raw API answer).
 import Resolver from '@forge/resolver';
-import type { Brief } from './core/brief';
+import { buildBrief, type Brief } from './core/brief';
+import { sampleSnapshot, sampleTeamSnapshot } from './core/sample';
 import { RISK_LABELS } from './core/risk';
 import { getMyself, getPerson } from './adapters/atlassian';
 import { isAccountId } from './adapters/parse';
 import { confidenceOf, contextPointsOf } from './core/standins';
 import { RETURN_LABELS } from './core/handback';
 import { addDays } from './core/dates';
-import { TEAM_RISK_LABELS, evidenceOf, type TeamRisk } from './core/team';
+import { TEAM_RISK_LABELS, buildTeamRisk, evidenceOf, type TeamRisk } from './core/team';
 import {
   failure,
   listProjects,
@@ -18,6 +19,7 @@ import {
   projectsOf,
   publish,
   requestWalkthrough,
+  requesterToday,
   standInsForItem,
   teamRisk,
   welcomeBack,
@@ -26,8 +28,9 @@ import {
 const resolver = new Resolver();
 
 /** What the page needs, without comment histories and other bulk. */
-function forUi(b: Brief) {
+function forUi(b: Brief, sample = false) {
   return {
+    sample,
     person: b.person,
     absence: b.absence,
     today: b.today,
@@ -224,8 +227,9 @@ export type IssuePanelData = {
 };
 
 /** The team view without comment histories: small enough for the page. */
-function teamForUi(t: TeamRisk) {
+function teamForUi(t: TeamRisk, sample = false) {
   return {
+    sample,
     projects: t.projects,
     today: t.today,
     window: t.window,
@@ -258,6 +262,23 @@ function teamForUi(t: TeamRisk) {
 }
 
 export type UiTeamRisk = ReturnType<typeof teamForUi>;
+
+/** A fictional team's plan, for sites with no open work yet. Reads and writes nothing. */
+resolver.define('sampleBrief', async () => {
+  try {
+    return forUi(buildBrief(sampleSnapshot(await requesterToday())), true);
+  } catch (e) {
+    return failure(e, 'sampleBrief');
+  }
+});
+
+resolver.define('sampleTeam', async () => {
+  try {
+    return teamForUi(buildTeamRisk(sampleTeamSnapshot(await requesterToday())), true);
+  } catch (e) {
+    return failure(e, 'sampleTeam');
+  }
+});
 
 resolver.define('listProjects', async ({ context }) => {
   try {

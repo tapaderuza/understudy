@@ -40,6 +40,7 @@ import { invoke, rovo } from '@forge/bridge';
 import type { UiBrief, UiTeamRisk, UiWelcomeBack } from '../resolvers';
 import { formatDay } from '../core/dates';
 import { Evidence, contextPoints } from './evidence';
+import { SAMPLE_NOTE, isSampleId } from '../core/sample';
 
 type Item = UiBrief['items'][number];
 type Option = { label: string; value: string };
@@ -221,12 +222,27 @@ const Handover = () => {
     else setBrief(r);
   };
 
+  /** A fictional team's plan, for a first look on a site with no open work. */
+  const showSample = async () => {
+    setLoading(true);
+    setError(null);
+    setPublished(null);
+    setSent({});
+    setOverrides({});
+    setBulkResult(null);
+    const r = await call<UiBrief>('sampleBrief');
+    setLoading(false);
+    if (isFailure(r)) setError(r.error);
+    else setBrief(r);
+  };
+  const sample = Boolean(brief?.sample);
+
   const chosen = (it: Item) => overrides[it.key] ?? it.standIn?.accountId ?? '';
 
   /** Briefs one stand-in; true when the briefing was sent. */
   const brieF = async (it: Item): Promise<boolean> => {
     const standInId = chosen(it);
-    if (!standInId) return false;
+    if (!standInId || sample) return false;
     setSending(it.key);
     const r = await call<{ message: string }>('notify', { issueKey: it.key, standInId, start, end, note });
     setSending(null);
@@ -235,7 +251,7 @@ const Handover = () => {
   };
 
   const doPublish = async () => {
-    if (!spaceId) return;
+    if (!spaceId || sample) return;
     setPublishing(true);
     const r = await call<{ url: string; title: string }>('publish', { accountId: personId, start, end, overrides, spaceId });
     setPublishing(false);
@@ -370,7 +386,7 @@ const Handover = () => {
           content: opts.length ? (
             <Stack space="space.100">
               <Inline space="space.100" alignBlock="center">
-                {id ? <User accountId={id} hideDisplayName /> : null}
+                {id && !isSampleId(id) ? <User accountId={id} hideDisplayName /> : null}
                 <Box xcss={picker}>
                   <Select
                     options={opts}
@@ -421,7 +437,7 @@ const Handover = () => {
               <LoadingButton
                 spacing="compact"
                 isLoading={sending === it.key}
-                isDisabled={!id || bulk !== null || (sending !== null && sending !== it.key)}
+                isDisabled={sample || !id || bulk !== null || (sending !== null && sending !== it.key)}
                 onClick={() => brieF(it)}
               >
                 Brief stand-in
@@ -589,6 +605,7 @@ const Handover = () => {
               Build handover
             </Button>
           }
+          secondaryAction={<Button onClick={showSample}>See a sample plan</Button>}
         />
       )}
 
@@ -601,6 +618,26 @@ const Handover = () => {
             </Text>
           </Stack>
         </Box>
+      )}
+
+      {brief && !loading && sample && (
+        <SectionMessage appearance="discovery" title="Sample data">
+          <Text>{SAMPLE_NOTE} Briefing and publishing are turned off. Pick someone and press Build handover to plan for your own team.</Text>
+        </SectionMessage>
+      )}
+
+      {brief && !loading && !sample && brief.stats.open === 0 && (
+        <SectionMessage
+          appearance="information"
+          title={`${brief.person.displayName} has no open Jira work`}
+          actions={[
+            <SectionMessageAction key="sample" onClick={showSample}>
+              See a sample plan
+            </SectionMessageAction>,
+          ]}
+        >
+          <Text>Pick someone with open work items, or see what a plan looks like for a fictional team.</Text>
+        </SectionMessage>
       )}
 
       {brief && !loading && (
@@ -637,11 +674,13 @@ const Handover = () => {
               )}
               {coverList.length > 0 && (
                 <Inline space="space.150" alignBlock="center" shouldWrap>
-                  <UserGroup>
-                    {coverList.map(([accountId]) => (
-                      <User key={accountId} accountId={accountId} />
-                    ))}
-                  </UserGroup>
+                  {!sample && (
+                    <UserGroup>
+                      {coverList.map(([accountId]) => (
+                        <User key={accountId} accountId={accountId} />
+                      ))}
+                    </UserGroup>
+                  )}
                   <Text size="small" color="color.text.subtle">
                     {coverList.map(([, c]) => `${c.name}: ${plural(c.count, 'item')}`).join(' · ')}
                   </Text>
@@ -701,7 +740,7 @@ const Handover = () => {
               />
             </Stack>
             <Inline space="space.150" alignBlock="center" shouldWrap>
-              <LoadingButton appearance="primary" isLoading={bulk !== null} isDisabled={pending.length === 0 || sending !== null} onClick={briefAll}>
+              <LoadingButton appearance="primary" isLoading={bulk !== null} isDisabled={sample || pending.length === 0 || sending !== null} onClick={briefAll}>
                 {pending.length > 0 ? `Brief all stand-ins (${pending.length})` : 'Brief all stand-ins'}
               </LoadingButton>
               {bulk ? (
@@ -781,7 +820,7 @@ const Handover = () => {
                   <Select placeholder="Confluence space" options={spaces} onChange={(o: Option) => setSpaceId(o.value)} />
                 )}
               </Box>
-              <LoadingButton appearance="primary" isLoading={publishing} isDisabled={!spaceId} onClick={doPublish}>
+              <LoadingButton appearance="primary" isLoading={publishing} isDisabled={sample || !spaceId} onClick={doPublish}>
                 Publish handover page
               </LoadingButton>
             </Inline>
@@ -1067,9 +1106,23 @@ const TeamRisk = () => {
   const backupOf = (it: RiskItem) => data?.people.find((p) => p.person.accountId === it.owner.accountId)?.backup ?? null;
   const learnerOf = (it: RiskItem) => learners[it.key] ?? it.closest?.accountId ?? backupOf(it)?.accountId ?? '';
 
+  const showSampleTeam = async () => {
+    setLoading(true);
+    setError(null);
+    setAsked({});
+    setLearners({});
+    const r = await call<UiTeamRisk>('sampleTeam');
+    setLoading(false);
+    if (isFailure(r)) setError(r.error);
+    else setData(r);
+  };
+  const sampleTeam = Boolean(data?.sample);
+  const who = (p: { accountId: string; displayName: string }) =>
+    isSampleId(p.accountId) ? <Text>{p.displayName}</Text> : <User accountId={p.accountId} />;
+
   const askWalkthrough = async (it: RiskItem) => {
     const learnerId = learnerOf(it);
-    if (!learnerId) return;
+    if (!learnerId || sampleTeam) return;
     setAsking(it.key);
     const r = await call<{ message: string }>('walkthrough', { issueKey: it.key, learnerId });
     setAsking(null);
@@ -1087,7 +1140,7 @@ const TeamRisk = () => {
   const peopleRows = (data?.people ?? []).map((p) => ({
     key: p.person.accountId,
     cells: [
-      { key: 'who', content: <User accountId={p.person.accountId} /> },
+      { key: 'who', content: who(p.person) },
       { key: 'open', content: <Text>{String(p.open)}</Text> },
       {
         key: 'solo',
@@ -1159,7 +1212,7 @@ const TeamRisk = () => {
             </Stack>
           ),
         },
-        { key: 'owner', content: <User accountId={it.owner.accountId} /> },
+        { key: 'owner', content: who(it.owner) },
         {
           key: 'closest',
           content: it.closest ? (
@@ -1190,7 +1243,7 @@ const TeamRisk = () => {
                   />
                 </Box>
               )}
-              <LoadingButton spacing="compact" isLoading={asking === it.key} isDisabled={!learnerOf(it)} onClick={() => askWalkthrough(it)}>
+              <LoadingButton spacing="compact" isLoading={asking === it.key} isDisabled={!learnerOf(it) || sampleTeam} onClick={() => askWalkthrough(it)}>
                 Request walkthrough
               </LoadingButton>
               {done && !done.ok && (
@@ -1250,6 +1303,7 @@ const TeamRisk = () => {
               Check knowledge risk
             </Button>
           }
+          secondaryAction={<Button onClick={showSampleTeam}>See a sample</Button>}
         />
       )}
 
@@ -1260,6 +1314,26 @@ const TeamRisk = () => {
             <Text color="color.text.subtle">Reading open work, comments and who worked where in the last 90 days</Text>
           </Stack>
         </Box>
+      )}
+
+      {data && !loading && sampleTeam && (
+        <SectionMessage appearance="discovery" title="Sample data">
+          <Text>{SAMPLE_NOTE} Walkthrough requests are turned off. Choose your projects and press Check knowledge risk to see your own team.</Text>
+        </SectionMessage>
+      )}
+
+      {data && !loading && !sampleTeam && data.stats.checked === 0 && (
+        <SectionMessage
+          appearance="information"
+          title="No open assigned work in these projects"
+          actions={[
+            <SectionMessageAction key="sample" onClick={showSampleTeam}>
+              See a sample
+            </SectionMessageAction>,
+          ]}
+        >
+          <Text>Choose projects where people have open work items, or see what this view shows for a fictional team.</Text>
+        </SectionMessage>
       )}
 
       {data && !loading && (
