@@ -197,6 +197,14 @@ export async function updateComment(key: string, commentId: string, adf: Json): 
   return String(res?.id ?? commentId);
 }
 
+/** Deletes a comment the current caller wrote. */
+export async function deleteComment(key: string, commentId: string): Promise<void> {
+  if (!isIssueKey(key)) throw new Error(`${key} is not a Jira work item key.`);
+  if (!/^\d{1,20}$/.test(commentId)) throw new Error('That is not a Jira comment ID.');
+  const k = key.trim().toUpperCase();
+  await json('jira', await caller().requestJira(route`/rest/api/3/issue/${k}/comment/${commentId}`, { method: 'DELETE' }));
+}
+
 /** Best effort: watching keeps the stand-in informed, but is not essential. */
 export async function addWatcher(key: string, accountId: string): Promise<boolean> {
   if (!isIssueKey(key) || !isAccountId(accountId)) return false;

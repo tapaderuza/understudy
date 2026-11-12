@@ -367,7 +367,12 @@ const LEAVE_SUMMARY = /^(time off|leave|vacation|holiday|pto|out of office|ooo|a
 
 export interface LeaveItem {
   key: string;
-  /** The person going away: the assignee, or the reporter when nobody is assigned. */
+  /**
+   * The person going away: whoever filed the item (its reporter). Drafting
+   * only for the person who asked means nobody can see someone else's work
+   * by filing time off for them, and an HR agent assigned to a leave request
+   * is never mistaken for the person going away.
+   */
   leaver: Person;
   /** First day away (YYYY-MM-DD), from a "Start date" field when Jira has one. */
   start?: string;
@@ -375,6 +380,8 @@ export interface LeaveItem {
   end?: string;
   /** True when Understudy already posted a draft on this item. */
   drafted: boolean;
+  /** IDs of Understudy's drafts on this item, oldest first. */
+  draftIds: string[];
 }
 
 /**
@@ -390,11 +397,13 @@ export function parseLeaveItem(raw: Json, startFieldId?: string): LeaveItem | un
   const labels: string[] = Array.isArray(f.labels) ? f.labels.map((x: unknown) => String(x).toLowerCase()) : [];
   const summary = (str(f.summary) ?? '').trim();
   if (!LEAVE_TYPES.test(type) && !labels.some((l) => LEAVE_LABELS.has(l)) && !LEAVE_SUMMARY.test(summary)) return undefined;
-  const who = [f.assignee, f.reporter].find((p) => isActivePerson(p));
-  const leaver = who ? person(who) : undefined;
+  const leaver = isActivePerson(f.reporter) ? person(f.reporter) : undefined;
   if (!leaver) return undefined;
   const start = startFieldId ? str(f[startFieldId])?.slice(0, 10) : undefined;
   const end = str(f.duedate)?.slice(0, 10);
-  const drafted = (f.comment?.comments ?? []).some((c: Json) => signedWith(c?.body, DRAFT_SIGNATURE));
-  return { key, leaver, start: isIsoDay(start) ? start : undefined, end: isIsoDay(end) ? end : undefined, drafted };
+  const draftIds = (f.comment?.comments ?? [])
+    .filter((c: Json) => signedWith(c?.body, DRAFT_SIGNATURE) && str(c?.id))
+    .map((c: Json) => String(c.id))
+    .sort((a: string, b: string) => Number(a) - Number(b));
+  return { key, leaver, start: isIsoDay(start) ? start : undefined, end: isIsoDay(end) ? end : undefined, drafted: draftIds.length > 0, draftIds };
 }
