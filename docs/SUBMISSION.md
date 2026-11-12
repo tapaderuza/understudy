@@ -37,7 +37,7 @@ Distribution is set to "Sharing with anyone" (production environment, Jira, with
 
 ## Demo video (YouTube, public, under 5 minutes)
 
-https://youtu.be/TAXImrdPv20 (public, 3:19). It shows the whole app live, including Team risk.
+https://youtu.be/vxxx8YDe6ek (public, 3:26). It shows the whole app live, including Team risk.
 
 ## About the project
 
@@ -149,4 +149,4 @@ forge, ui-kit, rovo, rovo-agent, rovo-skill, rovo-mcp, teamwork-graph, graphql, 
 
 # Demo video
 
-The demo video is https://youtu.be/TAXImrdPv20 (3:19). It was recorded live on the Forge demo site with the fictional people that come with it (Ada Isadora, Max Taylor, Cassi Owens, Ryan Lee) and the projects PAY, OPS and FIN: the handover plan, briefing and publishing, the draft Understudy posts on its own on a time-off request, Team risk with a walkthrough request, the work item panel, the Rovo agent, an external MCP client and Welcome back.
+The demo video is https://youtu.be/vxxx8YDe6ek (3:26). It was recorded live on the Forge demo site with the fictional people that come with it (Ada Isadora, Max Taylor, Cassi Owens, Ryan Lee) and the projects PAY, OPS and FIN: the handover plan, briefing and publishing, the draft Understudy posts on its own on a time-off request, Team risk with a walkthrough request, the work item panel, the Rovo agent (including a multi-step request that asks for two walkthroughs behind one confirmation), an external MCP client and Welcome back.
