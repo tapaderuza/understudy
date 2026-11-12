@@ -10,7 +10,7 @@ Understudy is a Forge app for Jira and Confluence, with a Rovo agent, that uses 
 - **Welcome back:** it shows what changed on your work while you were away, with the items that need you first (mentions, items handed to you, replies waiting) and which stand-in covered what.
 - **Team risk:** before anyone goes away, it finds the work only one person understands across up to 5 projects, shows how ready the team is to cover each person, and asks the owner for a 15-minute walkthrough with the colleague best placed to learn it.
 
-It works in four places: a Jira page with three tabs, a panel on every work item, a Rovo agent with three reusable skills, and an MCP server with eight tools that any MCP client can call.
+It works in four places: a Jira page with three tabs, a panel on every work item, a Rovo agent with three reusable skills, and an MCP server with eight tools that any MCP client can call. It also acts on its own: when someone creates a time-off work item, Understudy posts a draft handover on it for them, and briefs nobody until they have reviewed it.
 
 ---
 
@@ -113,7 +113,7 @@ Requirements: Node.js 22.23.4+ or 24.22.1+ for the latest Forge CLI (this repo p
 
 ```bash
 npm install
-npm run check          # TypeScript + 80 unit tests
+npm run check          # TypeScript + 90 unit tests
 npx forge login        # your Atlassian email and API token
 npx forge register     # writes the real app id into manifest.yml
 npx forge deploy

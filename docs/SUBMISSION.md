@@ -63,6 +63,8 @@ It also flags **work only you have context on**: items where nobody else has 3 o
 
 Then one click briefs every stand-in (or one at a time): a comment on the work item that @-mentions them with what they cover, why it matters and why they were picked, and adds them as a watcher. Briefing the same stand-in again updates your earlier briefing comment instead of adding a duplicate. Another click publishes the whole handover as a Confluence page.
 
+**On its own.** When someone creates a work item that announces time off (type Time off, Leave or Vacation, a label such as `time-off` or `vacation`, or a summary that starts with "Time off"), Understudy drafts the handover without being asked and posts it on that item for the person going away: the headline, who covers what, and what only they know. On the demo site, creating "Time off: Ada Isadora, 13 to 17 Nov" in the HR project got this comment from Understudy within a minute: "Ada Isadora has 7 open items: 4 must be covered from 13 Nov 2026, 2 fall due by 17 Nov 2026, 1 already overdue, 1 only Ada Isadora has context on. Suggested cover: Max Taylor: PAY-2, PAY-4 · Ryan Lee: OPS-1 · Cassi Owens: PAY-3. Before you go: only you have context on FIN-1." It lists keys and names only (no summaries, because everyone who can see the time-off item sees it), posts once, and briefs nobody: the person reviews the plan and briefs the stand-ins from the page or the agent.
+
 **Welcome back.** When you return, Understudy shows what other people did on your work since your first day away (status changes, reassignments, comments), with what needs you first: mentions, items handed to you, replies waiting. It recognizes its own briefings, so it can tell you which stand-in covered what.
 
 **Team risk.** Before anyone goes away, a manager or team lead picks up to 5 projects. Understudy checks every open assigned work item (up to the 100 most urgent) with the same evidence as a handover and finds the single points of knowledge: items where nobody else has 3 or more points of evidence. On the demo site, for PAY, OPS and FIN: "Only one person has context on 3 of the 14 open items in PAY, OPS, FIN, 2 of them due or urgent in the next two weeks. Ryan Lee holds the most: 2 of 2 items." Cover readiness, the share of open work someone else could pick up today, is 79%.
@@ -72,7 +74,8 @@ The view shows tiles (open items checked, only one person knows, of those urgent
 The handover warning counts only work that must be covered while someone is away, and the team view counts every open item, including work that can wait, so its numbers can be higher.
 
 **Everywhere you work:**
-- a Jira page with three tabs, *Before you go*, *Welcome back* and *Team risk*;
+- a Jira page with three tabs, *Before you go*, *Welcome back* and *Team risk*, with a sample plan and a sample team for sites that have no open work yet;
+- a draft handover posted on its own on every time-off work item;
 - an Understudy panel on every work item: "If Ada is away, who could cover this?";
 - a Rovo agent ("Prepare my handover for next week", "I'm back, what needs me first?", "Where is our team's knowledge held by one person?");
 - an MCP server with eight tools and three open skills, so a team's own Rovo Studio agents, or Claude and other MCP clients, can plan handovers too.
@@ -88,10 +91,11 @@ The handover warning counts only work that must be covered while someone is away
 - **Forge**, runtime `nodejs24.x`, UI Kit for the Jira global page (three tabs, with a UI Kit bar chart on Team risk) and the issue panel.
 - **Rovo:** `rovo:agent` with a prompt resource, eight `action` modules, and three `rovo:skill` modules (`handover-planner`, `welcome-back`, `knowledge-risk`) whose `SKILL.md` playbooks follow the Agent Skills format. The actions are `get-handover-brief`, `suggest-stand-ins`, `publish-handover-page`, `brief-stand-in`, `brief-all-stand-ins` (briefs every stand-in in the plan with one confirmation), `get-welcome-back-brief`, `get-team-knowledge-risk` (input `projects`, comma-separated keys; empty means the projects of the current user's open work) and `request-walkthrough` (inputs `issueKey`, `learner`, `note`). `publish-handover-page` and `brief-all-stand-ins` accept `standIns` ("PAY-3=Max Taylor; PAY-5=Cassi Owens"), so a plan edited in chat is what gets published and briefed.
 - **MCP:** `rovo:mcp` exposes the same eight actions as tools for Rovo Studio and for external MCP clients.
+- **Acting on its own:** a Forge product event `trigger` on created and updated work items (`ignoreSelf`, so its own comments never start it again) recognizes time-off items and runs the same engine. There is no signed-in person in a trigger, so an `AsyncLocalStorage` switch routes every Atlassian call through `asApp` for that run, and Teamwork Graph, which only answers people, is left out. The draft is signed "Prepared by Understudy." so it is posted once and never counts as evidence.
 - **Teamwork Graph API:** curated queries `atlassianUserInTeams` and `atlassianTeamMembers` (who is on the person's teams), `atlassianUserPullRequests` and `jiraWorkItemLinkedExternalPullRequests` (the user's pull requests and those linked to each work item, batched with GraphQL aliases) and `atlassianUserGoalsAndProjects` (what the work rolls up to). Each query has a plainer fallback, and each source reports its own state (connected, no data, not available), so missing scopes or an empty graph never fail the handover. On the Forge demo site, the graph intermittently refused reads with "User is not permitted to query this organization" (a known demo-site issue, reported on the Atlassian developer community) and did not link some fictional users to their teams. Understudy now retries that refusal (up to 3 times, with backoff), and when the graph links a person to no team it looks through the teams of the person asking and checks the member lists. With that, the demo site returns the signed-in user's teams and goals and "In the same team (Payments squad)" evidence for teammates such as Ryan Lee. Ada Isadora, the person in the video, was still missing from the graph's member list when it was recorded, so her plan shows "Teamwork Graph no data": the app says what is missing instead of hiding it.
 - **Jira and Confluence REST:** enhanced JQL search (with changelogs for Welcome back), ADF comments with mentions (a repeat briefing updates the earlier comment), watchers, CQL page search, and v2 pages to publish.
 - **Design for trust:** every call runs as the user (`asUser`), the graph is read-only, nothing is stored, nothing leaves Atlassian, and Understudy only writes (a comment, a watcher, a page) after a person confirms. Agent inputs come from an LLM, so identity always comes from the invocation context, and every key and account ID is validated before it reaches JQL.
-- **Quality:** the scoring, planning, team-risk, rendering and parsing logic is pure TypeScript with 80 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
+- **Quality:** the scoring, planning, team-risk, rendering and parsing logic is pure TypeScript with 90 unit tests. We checked every REST endpoint we call against Atlassian's published OpenAPI specs to keep the scope list minimal and complete, and then tested every surface live on a Forge demo site with 25 projects and thousands of work items.
 
 ### Challenges we ran into
 
@@ -103,6 +107,7 @@ The handover warning counts only work that must be covered while someone is away
 ### Accomplishments that we're proud of
 
 - The "only you know this" warning: the part of a handover that usually gets lost, found automatically.
+- Understudy acts without being asked: a time-off work item gets a draft handover within minutes, and nobody is briefed until the person going away has reviewed it.
 - A team view that finds single points of knowledge before anyone goes away, from the same evidence as a handover, and turns each one into a walkthrough request instead of a reassignment.
 - One engine behind four surfaces (page, issue panel, Rovo agent, MCP), so they always agree.
 - A complete loop: hand over, brief, publish, and hand back.
@@ -115,7 +120,7 @@ Context only builds confidence when people can see where it came from. Evidence 
 ### What's next for Understudy
 
 - Spot upcoming time off from calendar events in the Teamwork Graph and suggest starting a handover a few days ahead.
-- Automation: run the handover agent from a Jira Automation rule when someone sets their status to away.
+- Calendars: offer the same draft when time off is booked in a calendar, not only in Jira.
 - A scheduled weekly knowledge-risk digest, so a team lead sees new single points of knowledge without opening the page.
 
 ## How the project meets the main technology requirement
@@ -132,8 +137,9 @@ Understudy is a Forge app (`manifest.yml`, runtime `nodejs24.x`) that integrates
 6. Jira › Apps › Understudy › **Team risk**: choose up to 5 projects and press **Check knowledge risk**. **Request walkthrough** on a row posts a comment on that work item.
 7. Rovo chat › **Understudy** agent: try "Prepare my handover for next week" or "Where is our team's knowledge held by one person?".
 8. Optional MCP: enable the tools for external clients in Connected apps, then connect an MCP client to `https://mcp.atlassian.com/forge/f822ce82-2fbb-4e00-878f-0798dda01b8c`.
+9. Understudy on its own: create a work item with the label `time-off`, assigned to someone with open work and with a due date (the last day away). Within a few minutes Understudy comments a draft handover on it.
 
-Understudy works on any Jira site where people share projects, epics and components. For an empty development site, `scripts/seed-demo.mjs` creates a small fictional team's work to try it on.
+Understudy works on any Jira site where people share projects, epics and components. On a site with no open work yet, press **See a sample plan** (Before you go) or **See a sample** (Team risk) to see a fictional team, clearly marked as sample data; nothing is read or written. `scripts/seed-demo.mjs` can also create a small fictional team's work on an empty development site.
 
 ## Built with
 
