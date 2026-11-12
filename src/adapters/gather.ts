@@ -126,6 +126,8 @@ export interface GatherOptions {
   budgetMs?: number;
   /** Who is asking: their teams help find the person's teams in Teamwork Graph. */
   requesterId?: string;
+  /** Work items to leave out of the plan, such as the time-off item itself. */
+  excludeKeys?: string[];
 }
 
 export interface ReturnGather {
@@ -190,7 +192,11 @@ export async function gatherSnapshot(o: GatherOptions): Promise<Snapshot> {
   } else {
     rawItems = await ownWork();
   }
-  const workItems = rawItems.map(parseIssue).filter((w): w is NonNullable<typeof w> => Boolean(w));
+  const excluded = new Set(o.excludeKeys ?? []);
+  const workItems = rawItems
+    .map(parseIssue)
+    .filter((w): w is NonNullable<typeof w> => Boolean(w))
+    .filter((w) => !excluded.has(w.key));
   if (workItems.length === 0) sources.jira = 'empty';
   const siteUrl = siteFromSelf(rawItems[0]?.self) ?? (focus ? siteFromSelf(focus.url) : undefined);
   if (focus && !workItems.some((w) => w.key === focus.key)) workItems.push(focus);

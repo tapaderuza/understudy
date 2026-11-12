@@ -231,3 +231,39 @@ export function walkthroughComment(c: WalkthroughCommentInput): AdfNode {
   content.push(paragraph(text('Requested with Understudy.', [{ type: 'em' }])));
   return { type: 'doc', version: 1, content };
 }
+
+const mention = (p: { accountId: string; displayName: string }): AdfNode => ({
+  type: 'mention',
+  attrs: { id: p.accountId, text: `@${p.displayName}` },
+});
+
+/**
+ * The draft handover Understudy posts on a time-off work item on its own.
+ * Keys and names only, no summaries: everyone who can see the time-off item
+ * sees this. Nothing is sent to stand-ins until the person reviews it.
+ */
+export function draftHandoverComment(b: Brief): AdfNode {
+  const content: AdfNode[] = [
+    paragraph(
+      mention(b.person),
+      text(` Understudy prepared a draft handover for your time away (${formatDay(b.absence.start)} to ${formatDay(b.absence.end)}). ${b.headline}`),
+    ),
+  ];
+  if (b.cover.length) {
+    content.push(paragraph(strong('Suggested cover: '), text(b.cover.map((c) => `${c.displayName}: ${c.itemKeys.join(', ')}`).join(' · '))));
+  }
+  if (b.soloKnowledge.length) {
+    content.push(
+      paragraph(strong('Before you go: '), text(`only you have context on ${b.soloKnowledge.join(', ')}. Book a 15-minute walkthrough.`)),
+    );
+  }
+  content.push(
+    paragraph(
+      text(
+        'Review the plan, change any stand-in and brief them from Jira › Apps › Understudy, or ask the Understudy agent in Rovo. Nothing has been sent to anyone.',
+      ),
+    ),
+  );
+  content.push(paragraph(text('Prepared by Understudy.', [{ type: 'em' }])));
+  return { type: 'doc', version: 1, content };
+}

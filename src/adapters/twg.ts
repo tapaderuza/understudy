@@ -2,6 +2,7 @@
 // only (no Cypher to register), each with a plainer fallback, and degrades to
 // "unavailable" instead of failing the whole handover.
 import api from '@forge/api';
+import { isAppMode } from './actor';
 import type { Goal, PullRequest, SourceState, Teammate } from '../core/types';
 import { edgesOf, isAccountId, parseGoalsAndProjects, parsePullRequests, parseTeamMembers, parseTeams } from './parse';
 
@@ -154,6 +155,8 @@ export async function readGraph(
   requesterId?: string,
 ): Promise<GraphContext> {
   const empty: GraphContext = { pullRequests: [], goals: [], teammates: [], itemPullRequests: {}, state: 'unavailable', notes: [] };
+  // Teamwork Graph only answers people. A draft Understudy prepares on its own runs as the app.
+  if (isAppMode()) return { ...empty, notes: ['Teamwork Graph is read as a person, so it is left out of drafts Understudy prepares on its own.'] };
   if (!isAccountId(personId)) return { ...empty, notes: ['Teamwork Graph skipped: invalid account ID.'] };
   const userId = userAri(personId);
 

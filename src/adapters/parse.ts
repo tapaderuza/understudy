@@ -1,6 +1,6 @@
 // Pure parsers for Atlassian API responses. Kept apart from the HTTP calls so
 // they can be tested against recorded response shapes.
-import { addDays } from '../core/dates';
+import { addDays, isIsoDay } from '../core/dates';
 import type { ReturnEvent, ReturnItem } from '../core/handback';
 import type { Activity, Goal, Page, PeerWork, Person, PullRequest, PullRequestStatus, StatusCategory, WorkItem } from '../core/types';
 
@@ -267,7 +267,11 @@ function signedWith(body: Json, signature: string): boolean {
   return adfText(last).replace(/\.$/, '') === signature;
 }
 
-const isUnderstudyComment = (body: Json) => signedWith(body, UNDERSTUDY_SIGNATURE) || signedWith(body, WALKTHROUGH_SIGNATURE);
+/** Ends a draft handover Understudy posts on its own on a time-off work item (core/render). */
+export const DRAFT_SIGNATURE = 'Prepared by Understudy';
+
+const isUnderstudyComment = (body: Json) =>
+  signedWith(body, UNDERSTUDY_SIGNATURE) || signedWith(body, WALKTHROUGH_SIGNATURE) || signedWith(body, DRAFT_SIGNATURE);
 
 /**
  * The latest briefing Understudy posted on this work item for one stand-in,
@@ -330,6 +334,7 @@ export function parseReturnIssue(raw: Json, personId: string, since: string): Re
     // A briefing names the stand-in whoever sent it, most often the person
     // themselves just before leaving, so it is read before the author and
     // date checks below. It is never an event to catch up on. The latest wins.
+    if (signedWith(c?.body, DRAFT_SIGNATURE)) continue;
     if (signedWith(c?.body, UNDERSTUDY_SIGNATURE)) {
       if (at >= briefedFrom) coveredBy = str(c?.body?.content?.[0]?.content?.[0]?.attrs?.text)?.replace(/^@/, '') ?? coveredBy;
       continue;
@@ -352,4 +357,44 @@ export function parseReturnIssue(raw: Json, personId: string, since: string): Re
     mentionsYou,
     coveredBy,
   };
+}
+
+// ---- Time-off work items, for the handover Understudy drafts on its own ----
+
+const LEAVE_TYPES = /^(time off|leave|leave request|vacation|holiday|pto|out of office|absence)$/i;
+const LEAVE_LABELS = new Set(['leave', 'time-off', 'timeoff', 'time_off', 'vacation', 'holiday', 'pto', 'out-of-office', 'ooo', 'annual-leave']);
+const LEAVE_SUMMARY = /^(time off|leave|vacation|holiday|pto|out of office|ooo|annual leave)\b/i;
+
+export interface LeaveItem {
+  key: string;
+  /** The person going away: the assignee, or the reporter when nobody is assigned. */
+  leaver: Person;
+  /** First day away (YYYY-MM-DD), from a "Start date" field when Jira has one. */
+  start?: string;
+  /** Last day away (YYYY-MM-DD), from the due date. */
+  end?: string;
+  /** True when Understudy already posted a draft on this item. */
+  drafted: boolean;
+}
+
+/**
+ * A work item that announces time off: its type is Time off, Leave,
+ * Vacation and so on, it has a label such as "time-off" or "vacation", or
+ * its summary starts with "Time off". Anything else is not a leave item.
+ */
+export function parseLeaveItem(raw: Json, startFieldId?: string): LeaveItem | undefined {
+  const key = str(raw?.key);
+  const f = raw?.fields;
+  if (!key || !f) return undefined;
+  const type = (str(f.issuetype?.name) ?? '').trim();
+  const labels: string[] = Array.isArray(f.labels) ? f.labels.map((x: unknown) => String(x).toLowerCase()) : [];
+  const summary = (str(f.summary) ?? '').trim();
+  if (!LEAVE_TYPES.test(type) && !labels.some((l) => LEAVE_LABELS.has(l)) && !LEAVE_SUMMARY.test(summary)) return undefined;
+  const who = [f.assignee, f.reporter].find((p) => isActivePerson(p));
+  const leaver = who ? person(who) : undefined;
+  if (!leaver) return undefined;
+  const start = startFieldId ? str(f[startFieldId])?.slice(0, 10) : undefined;
+  const end = str(f.duedate)?.slice(0, 10);
+  const drafted = (f.comment?.comments ?? []).some((c: Json) => signedWith(c?.body, DRAFT_SIGNATURE));
+  return { key, leaver, start: isIsoDay(start) ? start : undefined, end: isIsoDay(end) ? end : undefined, drafted };
 }

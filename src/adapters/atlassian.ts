@@ -2,10 +2,11 @@
 // user who asked (asUser), so Understudy never shows anyone work they could
 // not already open themselves.
 //
-// Each request is written out as api.asUser().requestX(route`...`) at its
+// Each request is written out as caller().requestX(route`...`) at its
 // call site on purpose: that is the form `forge lint` can read to check the
 // manifest grants the scope every endpoint needs.
-import api, { route, type APIResponse } from '@forge/api';
+import { route, type APIResponse } from '@forge/api';
+import { caller } from './actor';
 import { apiErrorMessage, type ApiAction, type Product } from '../core/errors';
 import type { Page, Person } from '../core/types';
 import { isAccountId, isIssueKey, isProjectKey, parseConfluenceSearch, parsePersonResponse } from './parse';
@@ -86,7 +87,7 @@ export async function searchIssues(jql: string, fields: string[], max = 100, exp
     const body: Json = { jql, fields, maxResults: Math.min(100, max - out.length) };
     if (expand) body.expand = expand;
     if (nextPageToken) body.nextPageToken = nextPageToken;
-    const page = await json('jira', await api.asUser().requestJira(route`/rest/api/3/search/jql`, post(body)));
+    const page = await json('jira', await caller().requestJira(route`/rest/api/3/search/jql`, post(body)));
     out.push(...(page?.issues ?? []));
     nextPageToken = page?.isLast === false ? page?.nextPageToken : undefined;
   } while (nextPageToken && out.length < max);
@@ -95,7 +96,7 @@ export async function searchIssues(jql: string, fields: string[], max = 100, exp
 
 /** How many issues match, without reading them. Jira's count is approximate for very large results. */
 export async function approximateCount(jql: string): Promise<number> {
-  const res = await json('jira', await api.asUser().requestJira(route`/rest/api/3/search/approximate-count`, post({ jql })));
+  const res = await json('jira', await caller().requestJira(route`/rest/api/3/search/approximate-count`, post({ jql })));
   const n = Number(res?.count);
   if (!Number.isFinite(n)) throw new Error('Jira did not return a count.');
   return n;
@@ -110,7 +111,7 @@ export interface ProjectRef {
 export async function listProjects(max = 50): Promise<ProjectRef[]> {
   const res = await json(
     'jira',
-    await api.asUser().requestJira(route`/rest/api/3/project/search?maxResults=${max}&expand=insight`, GET),
+    await caller().requestJira(route`/rest/api/3/project/search?maxResults=${max}&expand=insight`, GET),
   );
   const values: Json[] = Array.isArray(res?.values) ? res.values : [];
   return values
@@ -120,21 +121,21 @@ export async function listProjects(max = 50): Promise<ProjectRef[]> {
 }
 
 export async function getMyself(): Promise<Person> {
-  const p = parsePersonResponse(await json('jira', await api.asUser().requestJira(route`/rest/api/3/myself`, GET)));
+  const p = parsePersonResponse(await json('jira', await caller().requestJira(route`/rest/api/3/myself`, GET)));
   if (!p) throw new Error('Could not read the current user.');
   return p;
 }
 
 /** The current user's time zone from their Jira profile, such as "Europe/Madrid", when Jira shares it. */
 export async function getMyTimeZone(): Promise<string | undefined> {
-  const me = await json('jira', await api.asUser().requestJira(route`/rest/api/3/myself`, GET));
+  const me = await json('jira', await caller().requestJira(route`/rest/api/3/myself`, GET));
   return typeof me?.timeZone === 'string' && me.timeZone ? me.timeZone : undefined;
 }
 
 export async function getPerson(accountId: string): Promise<Person> {
   if (!isAccountId(accountId)) throw new Error('That does not look like an Atlassian account ID.');
   const p = parsePersonResponse(
-    await json('jira', await api.asUser().requestJira(route`/rest/api/3/user?accountId=${accountId}`, GET)),
+    await json('jira', await caller().requestJira(route`/rest/api/3/user?accountId=${accountId}`, GET)),
   );
   if (!p) throw new Error(`No user found for ${accountId}.`);
   return p;
@@ -146,7 +147,7 @@ export async function findPeople(query: string, max = 5): Promise<Person[]> {
   if (!q) return [];
   const list: Json[] = await json(
     'jira',
-    await api.asUser().requestJira(route`/rest/api/3/user/search?query=${q}&maxResults=${max}`, GET),
+    await caller().requestJira(route`/rest/api/3/user/search?query=${q}&maxResults=${max}`, GET),
   );
   return (Array.isArray(list) ? list : [])
     .filter((u) => u?.accountType === 'atlassian' && u?.active !== false)
@@ -158,13 +159,29 @@ export async function getIssueRaw(key: string): Promise<Json> {
   if (!isIssueKey(key)) throw new Error(`${key} is not a Jira work item key.`);
   const k = key.trim().toUpperCase();
   const fields = [...ISSUE_FIELDS, 'assignee'].join(',');
-  return json('jira', await api.asUser().requestJira(route`/rest/api/3/issue/${k}?fields=${fields}`, GET));
+  return json('jira', await caller().requestJira(route`/rest/api/3/issue/${k}?fields=${fields}`, GET));
+}
+
+/** The ID of a field by its name, such as "Start date", when Jira has one. */
+export async function fieldIdByName(...names: string[]): Promise<string | undefined> {
+  const list: Json = await json('jira', await caller().requestJira(route`/rest/api/3/field`, GET));
+  const wanted = new Set(names.map((n) => n.toLowerCase()));
+  const f = (Array.isArray(list) ? list : []).find((x: Json) => wanted.has(String(x?.name ?? '').toLowerCase()));
+  return typeof f?.id === 'string' ? f.id : undefined;
+}
+
+/** A work item with the fields that tell whether it announces time off. */
+export async function getLeaveIssueRaw(key: string, extraFields: string[] = []): Promise<Json> {
+  if (!isIssueKey(key)) throw new Error(`${key} is not a Jira work item key.`);
+  const k = key.trim().toUpperCase();
+  const fields = ['summary', 'issuetype', 'labels', 'assignee', 'reporter', 'duedate', 'comment', ...extraFields.filter((f) => /^[A-Za-z0-9_]{1,64}$/.test(f))].join(',');
+  return json('jira', await caller().requestJira(route`/rest/api/3/issue/${k}?fields=${fields}`, GET));
 }
 
 export async function addComment(key: string, adf: Json): Promise<string | undefined> {
   if (!isIssueKey(key)) throw new Error(`${key} is not a Jira work item key.`);
   const k = key.trim().toUpperCase();
-  const res = await json('jira', await api.asUser().requestJira(route`/rest/api/3/issue/${k}/comment`, post({ body: adf })));
+  const res = await json('jira', await caller().requestJira(route`/rest/api/3/issue/${k}/comment`, post({ body: adf })));
   return res?.id;
 }
 
@@ -175,7 +192,7 @@ export async function updateComment(key: string, commentId: string, adf: Json): 
   const k = key.trim().toUpperCase();
   const res = await json(
     'jira',
-    await api.asUser().requestJira(route`/rest/api/3/issue/${k}/comment/${commentId}`, { ...post({ body: adf }), method: 'PUT' }),
+    await caller().requestJira(route`/rest/api/3/issue/${k}/comment/${commentId}`, { ...post({ body: adf }), method: 'PUT' }),
   );
   return String(res?.id ?? commentId);
 }
@@ -185,7 +202,7 @@ export async function addWatcher(key: string, accountId: string): Promise<boolea
   if (!isIssueKey(key) || !isAccountId(accountId)) return false;
   const k = key.trim().toUpperCase();
   try {
-    await json('jira', await api.asUser().requestJira(route`/rest/api/3/issue/${k}/watchers`, post(accountId)));
+    await json('jira', await caller().requestJira(route`/rest/api/3/issue/${k}/watchers`, post(accountId)));
     return true;
   } catch {
     return false;
@@ -198,7 +215,7 @@ export async function recentPagesBy(accountId: string, limit = 10): Promise<Page
   if (!isAccountId(accountId)) return [];
   const cql = `contributor = "${accountId}" AND type = page AND lastmodified >= now("-60d") ORDER BY lastmodified DESC`;
   return parseConfluenceSearch(
-    await json('confluence', await api.asUser().requestConfluence(route`/wiki/rest/api/search?cql=${cql}&limit=${limit}`, GET)),
+    await json('confluence', await caller().requestConfluence(route`/wiki/rest/api/search?cql=${cql}&limit=${limit}`, GET)),
   );
 }
 
@@ -213,7 +230,7 @@ const toSpace = (s: Json): Space => ({ id: String(s.id), key: String(s.key), nam
 export async function listSpaces(): Promise<Space[]> {
   const res = await json(
     'confluence',
-    await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=${100}&status=current&sort=name`, GET),
+    await caller().requestConfluence(route`/wiki/api/v2/spaces?limit=${100}&status=current&sort=name`, GET),
   );
   return (res?.results ?? []).filter((s: Json) => s?.id && s?.key).map(toSpace);
 }
@@ -221,7 +238,7 @@ export async function listSpaces(): Promise<Space[]> {
 export async function spaceByKey(key: string): Promise<Space | undefined> {
   const clean = key.trim();
   if (!/^[A-Za-z0-9~_-]{1,255}$/.test(clean)) return undefined;
-  const res = await json('confluence', await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?keys=${clean}`, GET));
+  const res = await json('confluence', await caller().requestConfluence(route`/wiki/api/v2/spaces?keys=${clean}`, GET));
   const s = res?.results?.[0];
   return s ? toSpace(s) : undefined;
 }
@@ -231,9 +248,7 @@ export async function createPage(spaceId: string, title: string, storage: string
   const attempt = async (t: string) =>
     json(
       'confluence',
-      await api
-        .asUser()
-        .requestConfluence(
+      await caller().requestConfluence(
           route`/wiki/api/v2/pages`,
           post({ spaceId, status: 'current', title: t, body: { representation: 'storage', value: storage } }),
         ),

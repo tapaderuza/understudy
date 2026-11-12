@@ -305,7 +305,18 @@ modules:
           required: false
           description: "Optional context, such as a suggested time."
 
+  trigger:
+    - key: time-off-trigger
+      function: leave-fn
+      events:
+        - avi:jira:created:issue
+        - avi:jira:updated:issue
+      filter:
+        ignoreSelf: true
+
   function:
+    - key: leave-fn
+      handler: index.onLeaveItem
     - key: resolver
       handler: index.handler
     - key: brief-fn

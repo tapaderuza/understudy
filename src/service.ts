@@ -97,6 +97,8 @@ export interface BriefRequest {
   focus?: WorkItem;
   /** Who is asking, when known. */
   requesterId?: string;
+  /** Work items to leave out, such as the time-off item itself. */
+  excludeKeys?: string[];
 }
 
 export async function prepare(req: BriefRequest): Promise<{ brief: Brief; snapshot: Snapshot; absence: Absence }> {
@@ -111,6 +113,7 @@ export async function prepare(req: BriefRequest): Promise<{ brief: Brief; snapsh
     person: req.person,
     focus: req.focus,
     requesterId: req.requesterId,
+    excludeKeys: req.excludeKeys,
   });
   const overrides = Object.fromEntries(
     Object.entries(req.overrides ?? {}).filter(([k, v]) => isIssueKey(k) && isAccountId(v)),
