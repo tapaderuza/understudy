@@ -3,12 +3,12 @@
 // as a comment for the person going away. It only reads and comments; stand-
 // ins are briefed after the person reviews the plan.
 import { asTheApp } from './adapters/actor';
-import { addComment, deleteComment, fieldIdByName, getLeaveIssueRaw } from './adapters/atlassian';
-import { isIssueKey, parseLeaveItem } from './adapters/parse';
+import { addComment, deleteComment, fieldIdByName, getLeaveIssueRaw, searchIssues } from './adapters/atlassian';
+import { DRAFT_SIGNATURE, isIssueKey, parseLeaveItem } from './adapters/parse';
 import { addDays, todayIn } from './core/dates';
 import { userMessage } from './core/errors';
-import { draftHandoverComment } from './core/render';
-import { prepare } from './service';
+import { draftHandoverComment, welcomeBackComment } from './core/render';
+import { prepare, welcomeBack } from './service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -78,5 +78,50 @@ export async function onLeaveItem(event: Json): Promise<void> {
     });
   } catch (e) {
     console.error('[understudy] time-off trigger failed', userMessage(e));
+  }
+}
+
+/** A time-off item whose last day was this many days ago or less still gets its catch-up. */
+const RETURN_WINDOW_DAYS = 3;
+/** Catch-ups posted per daily run at most, well inside the function's time limit. */
+const MAX_DAILY_CATCH_UPS = 10;
+
+/** The first day away, for the catch-up: the item's start date, else the day after the draft was posted. */
+export function firstDayAway(start: string | undefined, draftedOn: string | undefined, end: string | undefined, today: string): string {
+  if (start) return start;
+  if (draftedOn) return addDays(draftedOn, 1);
+  return addDays(end ?? today, -(DEFAULT_DAYS_AWAY - 1));
+}
+
+/**
+ * Once a day: for every time-off item Understudy drafted a handover on whose
+ * last day has just passed, post the welcome-back catch-up on that item for
+ * the person who filed it. Runs as the app, posts once per item.
+ */
+export async function onDailyWelcomeBack(): Promise<void> {
+  try {
+    await asTheApp(async () => {
+      const today = todayIn(undefined);
+      if (startFieldId === undefined) startFieldId = (await fieldIdByName('Start date').catch(() => undefined)) ?? null;
+      const extra = startFieldId ? [startFieldId] : [];
+      const raw = await searchIssues(
+        `comment ~ "${DRAFT_SIGNATURE}" AND duedate >= "${addDays(today, -RETURN_WINDOW_DAYS)}" AND duedate < "${today}" ORDER BY duedate DESC`,
+        ['summary', 'issuetype', 'labels', 'reporter', 'duedate', 'comment', ...extra],
+        25,
+      );
+      let posted = 0;
+      for (const r of raw) {
+        if (posted >= MAX_DAILY_CATCH_UPS) break;
+        const leave = parseLeaveItem(r, startFieldId ?? undefined);
+        if (!leave || !leave.drafted || leave.welcomed) continue;
+        const since = firstDayAway(leave.start, leave.draftedOn, leave.end, today);
+        const catchUp = await welcomeBack(leave.leaver, since, today);
+        await addComment(leave.key, welcomeBackComment(catchUp));
+        posted += 1;
+      }
+      console.info('[understudy] daily welcome back', JSON.stringify({ checked: raw.length, posted }));
+    });
+  } catch (e) {
+    console.error('[understudy] daily welcome back failed', userMessage(e));
   }
 }

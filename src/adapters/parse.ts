@@ -269,9 +269,14 @@ function signedWith(body: Json, signature: string): boolean {
 
 /** Ends a draft handover Understudy posts on its own on a time-off work item (core/render). */
 export const DRAFT_SIGNATURE = 'Prepared by Understudy';
+/** Ends the catch-up Understudy posts on the same item once the person is back (core/render). */
+export const WELCOME_SIGNATURE = 'Welcome back from Understudy';
 
 const isUnderstudyComment = (body: Json) =>
-  signedWith(body, UNDERSTUDY_SIGNATURE) || signedWith(body, WALKTHROUGH_SIGNATURE) || signedWith(body, DRAFT_SIGNATURE);
+  signedWith(body, UNDERSTUDY_SIGNATURE) ||
+  signedWith(body, WALKTHROUGH_SIGNATURE) ||
+  signedWith(body, DRAFT_SIGNATURE) ||
+  signedWith(body, WELCOME_SIGNATURE);
 
 /**
  * The latest briefing Understudy posted on this work item for one stand-in,
@@ -334,7 +339,7 @@ export function parseReturnIssue(raw: Json, personId: string, since: string): Re
     // A briefing names the stand-in whoever sent it, most often the person
     // themselves just before leaving, so it is read before the author and
     // date checks below. It is never an event to catch up on. The latest wins.
-    if (signedWith(c?.body, DRAFT_SIGNATURE)) continue;
+    if (signedWith(c?.body, DRAFT_SIGNATURE) || signedWith(c?.body, WELCOME_SIGNATURE)) continue;
     if (signedWith(c?.body, UNDERSTUDY_SIGNATURE)) {
       if (at >= briefedFrom) coveredBy = str(c?.body?.content?.[0]?.content?.[0]?.attrs?.text)?.replace(/^@/, '') ?? coveredBy;
       continue;
@@ -382,6 +387,10 @@ export interface LeaveItem {
   drafted: boolean;
   /** IDs of Understudy's drafts on this item, oldest first. */
   draftIds: string[];
+  /** Day (YYYY-MM-DD) the first draft was posted, when there is one. */
+  draftedOn?: string;
+  /** True when Understudy already posted the welcome-back catch-up on this item. */
+  welcomed: boolean;
 }
 
 /**
@@ -401,9 +410,21 @@ export function parseLeaveItem(raw: Json, startFieldId?: string): LeaveItem | un
   if (!leaver) return undefined;
   const start = startFieldId ? str(f[startFieldId])?.slice(0, 10) : undefined;
   const end = str(f.duedate)?.slice(0, 10);
-  const draftIds = (f.comment?.comments ?? [])
-    .filter((c: Json) => signedWith(c?.body, DRAFT_SIGNATURE) && str(c?.id))
-    .map((c: Json) => String(c.id))
-    .sort((a: string, b: string) => Number(a) - Number(b));
-  return { key, leaver, start: isIsoDay(start) ? start : undefined, end: isIsoDay(end) ? end : undefined, drafted: draftIds.length > 0, draftIds };
+  const all: Json[] = f.comment?.comments ?? [];
+  const drafts = all
+    .filter((c) => signedWith(c?.body, DRAFT_SIGNATURE) && str(c?.id))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const draftIds = drafts.map((c) => String(c.id));
+  const draftedOn = str(drafts[0]?.created)?.slice(0, 10);
+  const welcomed = all.some((c) => signedWith(c?.body, WELCOME_SIGNATURE));
+  return {
+    key,
+    leaver,
+    start: isIsoDay(start) ? start : undefined,
+    end: isIsoDay(end) ? end : undefined,
+    drafted: draftIds.length > 0,
+    draftIds,
+    draftedOn: isIsoDay(draftedOn) ? draftedOn : undefined,
+    welcomed,
+  };
 }

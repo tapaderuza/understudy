@@ -1,4 +1,5 @@
 import type { Brief, BriefItem } from './brief';
+import type { WelcomeBack } from './handback';
 import { formatDay } from './dates';
 import { RISK_LABELS, type Tier } from './risk';
 import type { Absence } from './types';
@@ -265,5 +266,25 @@ export function draftHandoverComment(b: Brief): AdfNode {
     ),
   );
   content.push(paragraph(text('Prepared by Understudy.', [{ type: 'em' }])));
+  return { type: 'doc', version: 1, content };
+}
+
+/**
+ * The catch-up Understudy posts on its own on the time-off item once the
+ * person is back: what needs them first and which stand-in covered what.
+ * Keys and names only, like the draft.
+ */
+export function welcomeBackComment(w: WelcomeBack): AdfNode {
+  const first = w.items.filter((i) => i.needsYou).slice(0, 10);
+  const covered = w.items.filter((i) => i.coveredBy).slice(0, 10);
+  const content: AdfNode[] = [paragraph(mention(w.person), text(` Welcome back. ${w.headline}`))];
+  if (first.length) content.push(paragraph(strong('Needs you first: '), text(first.map((i) => i.key).join(', '))));
+  if (covered.length) {
+    content.push(paragraph(strong('Covered while you were away: '), text(covered.map((i) => `${i.key} (${i.coveredBy})`).join(', '))));
+  }
+  content.push(
+    paragraph(text('The details are in Jira › Apps › Understudy › Welcome back, or ask the Understudy agent: "I\'m back, what needs me first?"')),
+  );
+  content.push(paragraph(text('Welcome back from Understudy.', [{ type: 'em' }])));
   return { type: 'doc', version: 1, content };
 }

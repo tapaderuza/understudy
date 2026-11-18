@@ -314,7 +314,14 @@ modules:
       filter:
         ignoreSelf: true
 
+  scheduledTrigger:
+    - key: welcome-back-daily
+      function: welcome-daily-fn
+      interval: day
+
   function:
+    - key: welcome-daily-fn
+      handler: index.onDailyWelcomeBack
     - key: leave-fn
       handler: index.onLeaveItem
     - key: resolver

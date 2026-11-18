@@ -1,5 +1,5 @@
 export { handler } from './resolvers';
-export { onLeaveItem } from './proactive';
+export { onDailyWelcomeBack, onLeaveItem } from './proactive';
 export {
   briefAllStandInsAction,
   briefStandIn,
